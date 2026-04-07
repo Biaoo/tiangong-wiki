@@ -49,6 +49,19 @@ function parseNonNegativeInteger(raw: string | undefined, defaultValue: number, 
   return value;
 }
 
+function parsePositiveInteger(raw: string | undefined, defaultValue: number, label: string): number {
+  if (!raw) {
+    return defaultValue;
+  }
+
+  const value = Number.parseInt(raw, 10);
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new AppError(`${label} must be a positive integer, got ${raw}`, "config");
+  }
+
+  return value;
+}
+
 function normalizeOptionalUrl(rawValue: string | undefined): string | null {
   const value = rawValue?.trim();
   if (!value) {
@@ -104,6 +117,11 @@ export function resolveAgentSettings(
   const apiKey = env.WIKI_AGENT_API_KEY?.trim() || null;
   const model = env.WIKI_AGENT_MODEL?.trim() || null;
   const batchSize = parseNonNegativeInteger(env.WIKI_AGENT_BATCH_SIZE, 5, "WIKI_AGENT_BATCH_SIZE");
+  const workflowTimeoutSeconds = parsePositiveInteger(
+    env.WIKI_WORKFLOW_TIMEOUT,
+    600,
+    "WIKI_WORKFLOW_TIMEOUT",
+  );
   const missing: string[] = [];
 
   if (enabled) {
@@ -128,6 +146,7 @@ export function resolveAgentSettings(
     apiKey,
     model,
     batchSize,
+    workflowTimeoutSeconds,
     configured: enabled && missing.length === 0,
     missing,
   };

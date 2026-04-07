@@ -76,6 +76,7 @@ export function registerCheckConfigCommand(program: Command): void {
             agentBaseUrl: wikiAgent.baseUrl ?? "",
             agentModel: wikiAgent.model ?? "",
             agentBatchSize: wikiAgent.batchSize,
+            agentWorkflowTimeoutSeconds: wikiAgent.workflowTimeoutSeconds,
             agentMissing: wikiAgent.missing.join(", "),
             probe,
           }),

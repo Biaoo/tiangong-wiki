@@ -144,7 +144,7 @@ describe("CodexSdkWorkflowRunner", () => {
     expect(startClientOptions.env?.WIKI_CLI_WRAPPER).toBeUndefined();
     const startedRun = startThread.mock.results[0]?.value.runStreamed as ReturnType<typeof vi.fn>;
     const resumedRun = resumeThread.mock.results[0]?.value.runStreamed as ReturnType<typeof vi.fn>;
-    expect(startedRun).toHaveBeenCalledWith("Process the queue item.");
-    expect(resumedRun).toHaveBeenCalledWith("Process the queue item.");
+    expect(startedRun).toHaveBeenCalledWith("Process the queue item.", undefined);
+    expect(resumedRun).toHaveBeenCalledWith("Process the queue item.", undefined);
   });
 });

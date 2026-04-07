@@ -483,4 +483,94 @@ describe("workflow runner selection", () => {
       }),
     ]);
   });
+
+  it("times out stuck workflow attempts, aborts the active run, and records timeout details", async () => {
+    const workspace = createWorkspace(baseEnv({ WIKI_AGENT_BATCH_SIZE: "1", WIKI_WORKFLOW_TIMEOUT: "1" }));
+    workspaces.push(workspace);
+    writeVaultFile(workspace, "imports/stuck.pdf", "This workflow never finishes.");
+
+    runCli(["init"], workspace.env);
+
+    let abortReason: unknown = null;
+    const runner: CodexWorkflowRunner = {
+      async startWorkflow(input: CodexWorkflowInput): Promise<CodexWorkflowHandle> {
+        input.onThreadStarted?.("stuck-thread");
+        return await new Promise<CodexWorkflowHandle>((_, reject) => {
+          input.signal?.addEventListener(
+            "abort",
+            () => {
+              abortReason = input.signal?.reason ?? null;
+              reject(input.signal?.reason ?? new Error("aborted"));
+            },
+            { once: true },
+          );
+        });
+      },
+      async resumeWorkflow(): Promise<CodexWorkflowHandle> {
+        throw new Error("resumeWorkflow should not run for a fresh stuck item");
+      },
+      async collectResult(): Promise<WorkflowResultManifest> {
+        throw new Error("collectResult should not run after a startWorkflow timeout");
+      },
+    };
+
+    const logs: string[] = [];
+    const result = await processVaultQueueBatch(workspace.env, {
+      workflowRunner: runner,
+      log: (message) => logs.push(message),
+    });
+
+    expect(result).toMatchObject({
+      processed: 1,
+      done: 0,
+      skipped: 0,
+      errored: 1,
+      items: [
+        expect.objectContaining({
+          fileId: "imports/stuck.pdf",
+          status: "error",
+          threadId: "stuck-thread",
+          reason: "Workflow startWorkflow timed out after 1s",
+        }),
+      ],
+    });
+    expect(abortReason).toBeInstanceOf(AppError);
+    expect(logs).toEqual(
+      expect.arrayContaining([
+        "claimed 1 items: imports/stuck.pdf",
+        expect.stringContaining("imports/stuck.pdf: start processing"),
+        expect.stringContaining("imports/stuck.pdf: launching workflow mode=start attempt=1/1 timeout=1s"),
+        expect.stringContaining("imports/stuck.pdf: workflow started mode=start attempt=1/1 thread=stuck-thread"),
+        expect.stringContaining("imports/stuck.pdf: error thread=stuck-thread"),
+      ]),
+    );
+    expect(logs.some((message) => message.includes("message=Workflow startWorkflow timed out after 1s"))).toBe(true);
+
+    const queueRows = queryDb<Record<string, string | number | null>>(
+      workspace,
+      `
+        SELECT
+          file_id AS fileId,
+          status,
+          thread_id AS threadId,
+          attempts,
+          error_message AS errorMessage,
+          last_error_at AS lastErrorAt,
+          result_manifest_path AS resultManifestPath
+        FROM vault_processing_queue
+        WHERE file_id = 'imports/stuck.pdf'
+      `,
+    );
+    expect(queueRows).toEqual([
+      expect.objectContaining({
+        fileId: "imports/stuck.pdf",
+        status: "error",
+        threadId: "stuck-thread",
+        attempts: 1,
+        errorMessage: "Workflow startWorkflow timed out after 1s",
+      }),
+    ]);
+    expect(queueRows[0]?.lastErrorAt).toBeTruthy();
+    expect(queueRows[0]?.resultManifestPath).toBeTruthy();
+  });
 });

@@ -367,6 +367,49 @@ function formatWorkflowError(error: unknown): string {
   return `${message}: ${cause}`;
 }
 
+function createWorkflowTimeoutError(
+  phase: "startWorkflow" | "resumeWorkflow" | "collectResult",
+  timeoutMs: number,
+): AppError {
+  return new AppError(`Workflow ${phase} timed out after ${Math.ceil(timeoutMs / 1000)}s`, "runtime", {
+    phase,
+    timeoutMs,
+  });
+}
+
+async function runWithWorkflowTimeout<T>(
+  phase: "startWorkflow" | "resumeWorkflow" | "collectResult",
+  timeoutMs: number,
+  controller: AbortController,
+  run: () => Promise<T>,
+): Promise<T> {
+  let timedOut = false;
+  const timeoutError = createWorkflowTimeoutError(phase, timeoutMs);
+  let timeoutHandle: NodeJS.Timeout | null = null;
+
+  try {
+    return await Promise.race([
+      run(),
+      new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(() => {
+          timedOut = true;
+          controller.abort(timeoutError);
+          reject(timeoutError);
+        }, timeoutMs);
+      }),
+    ]);
+  } catch (error) {
+    if (timedOut) {
+      throw timeoutError;
+    }
+    throw error;
+  } finally {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
+  }
+}
+
 // A runner failure can happen after the agent has already written a final result.json.
 // Recover that manifest instead of blindly re-injecting the same task.
 function readRecoverableWorkflowResult(
@@ -597,6 +640,11 @@ export async function processVaultQueueBatch(
     const workflowRunner = options.workflowRunner ?? new CodexSdkWorkflowRunner();
     const templateEvolution = resolveTemplateEvolutionSettings(env);
     const maxWorkflowAttempts = isInlineRetryCapable(workflowRunner) ? INLINE_WORKFLOW_ATTEMPTS : 1;
+    const workflowTimeoutMs = agentSettings.workflowTimeoutSeconds * 1000;
+
+    if (items.length > 0) {
+      options.log?.(`claimed ${items.length} items: ${items.map((item) => item.fileId).join(", ")}`);
+    }
 
     const countOutcome = (status: VaultQueueStatus) => {
       if (status === "done") {
@@ -610,6 +658,9 @@ export async function processVaultQueueBatch(
     };
 
     for (const item of items) {
+      options.log?.(
+        `${item.fileId}: start processing attempt=${item.attempts + 1} queuedAt=${item.queuedAt} thread=${item.threadId ?? "-"}`
+      );
       const file = fetchVaultFile(db, item.fileId);
       if (!file) {
         updateQueueStatus(db, item.fileId, {
@@ -619,6 +670,7 @@ export async function processVaultQueueBatch(
           incrementAttempts: true,
         });
         countOutcome("error");
+        options.log?.(`${item.fileId}: error thread=- result=- message=Vault file missing from index`);
         result.items.push({
           fileId: item.fileId,
           status: "error",
@@ -653,16 +705,60 @@ export async function processVaultQueueBatch(
 
         for (let attempt = 1; attempt <= maxWorkflowAttempts; attempt += 1) {
           try {
+            const mode = threadId ? "resume" : "start";
+            const workflowController = new AbortController();
+            let loggedStartedThreadId: string | null = null;
+            const attemptInput: CodexWorkflowInput = {
+              ...input,
+              signal: workflowController.signal,
+              onThreadStarted: (startedThreadId) => {
+                if (loggedStartedThreadId === startedThreadId) {
+                  return;
+                }
+                loggedStartedThreadId = startedThreadId;
+                threadId = startedThreadId;
+                updateQueueWorkflowTracking(db, item.fileId, {
+                  threadId: startedThreadId,
+                  resultManifestPath: artifacts.resultPath,
+                });
+                options.log?.(
+                  `${item.fileId}: workflow started mode=${mode} attempt=${attempt}/${maxWorkflowAttempts} thread=${startedThreadId} result=${artifacts.resultPath}`,
+                );
+              },
+            };
+
+            options.log?.(
+              `${item.fileId}: launching workflow mode=${mode} attempt=${attempt}/${maxWorkflowAttempts} timeout=${agentSettings.workflowTimeoutSeconds}s result=${artifacts.resultPath}`,
+            );
             const handle = threadId
-              ? await workflowRunner.resumeWorkflow(threadId, input)
-              : await workflowRunner.startWorkflow(input);
+              ? await runWithWorkflowTimeout("resumeWorkflow", workflowTimeoutMs, workflowController, () =>
+                  workflowRunner.resumeWorkflow(threadId!, attemptInput),
+                )
+              : await runWithWorkflowTimeout("startWorkflow", workflowTimeoutMs, workflowController, () =>
+                  workflowRunner.startWorkflow(attemptInput),
+                );
             threadId = handle.threadId;
+            if (loggedStartedThreadId !== handle.threadId) {
+              loggedStartedThreadId = handle.threadId;
+              options.log?.(
+                `${item.fileId}: workflow started mode=${mode} attempt=${attempt}/${maxWorkflowAttempts} thread=${handle.threadId} result=${artifacts.resultPath}`,
+              );
+            }
             updateQueueWorkflowTracking(db, item.fileId, {
               threadId: handle.threadId,
               resultManifestPath: artifacts.resultPath,
             });
 
-            const manifest = await workflowRunner.collectResult(handle, input);
+            options.log?.(
+              `${item.fileId}: waiting for workflow result thread=${handle.threadId} attempt=${attempt}/${maxWorkflowAttempts} result=${artifacts.resultPath}`,
+            );
+            const collectController = new AbortController();
+            const manifest = await runWithWorkflowTimeout("collectResult", workflowTimeoutMs, collectController, () =>
+              workflowRunner.collectResult(handle, {
+                ...input,
+                signal: collectController.signal,
+              }),
+            );
             assertTemplateEvolutionAllowed(manifest, templateEvolution);
             finalOutcome = {
               outcome: applyWorkflowManifest(db, item.fileId, manifest, artifacts.resultPath),

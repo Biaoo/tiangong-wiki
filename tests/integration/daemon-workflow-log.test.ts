@@ -76,15 +76,23 @@ describe("daemon workflow observability", () => {
     });
 
     expect(processed.done).toBe(1);
-    expect(logs).toHaveLength(1);
-    expect(logs[0]).toContain("imports/evidence-review.pdf: done");
-    expect(logs[0]).toContain("thread=fake-thread-1");
-    expect(logs[0]).toContain("decision=apply");
-    expect(logs[0]).toContain("skills=wiki-skill,pdf");
-    expect(logs[0]).toContain("created=methods/evidence-review.md");
-    expect(logs[0]).toContain("updated=concepts/evidence-ops.md");
-    expect(logs[0]).toContain("proposed=evidence-brief");
-    expect(logs[0]).toContain("result=");
+    expect(logs).toEqual(
+      expect.arrayContaining([
+        "claimed 1 items: imports/evidence-review.pdf",
+        expect.stringContaining("imports/evidence-review.pdf: start processing"),
+        expect.stringContaining("imports/evidence-review.pdf: launching workflow mode=start"),
+        expect.stringContaining("imports/evidence-review.pdf: workflow started mode=start attempt=1/1 thread=fake-thread-1"),
+        expect.stringContaining("imports/evidence-review.pdf: waiting for workflow result thread=fake-thread-1"),
+        expect.stringContaining("imports/evidence-review.pdf: done thread=fake-thread-1"),
+      ]),
+    );
+    const completionLog = logs.find((message) => message.includes("imports/evidence-review.pdf: done"));
+    expect(completionLog).toContain("decision=apply");
+    expect(completionLog).toContain("skills=wiki-skill,pdf");
+    expect(completionLog).toContain("created=methods/evidence-review.md");
+    expect(completionLog).toContain("updated=concepts/evidence-ops.md");
+    expect(completionLog).toContain("proposed=evidence-brief");
+    expect(completionLog).toContain("result=");
 
     const queue = runCliJson<{
       items: Array<{

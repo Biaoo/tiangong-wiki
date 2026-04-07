@@ -19,6 +19,8 @@ export interface CodexWorkflowInput {
   skillArtifactsPath: string;
   model?: string | null;
   env?: NodeJS.ProcessEnv;
+  signal?: AbortSignal;
+  onThreadStarted?: (threadId: string) => void;
 }
 
 export interface CodexWorkflowHandle {
@@ -81,16 +83,29 @@ function persistWorkflowThreadId(queueItemPath: string, threadId: string): void 
 
 async function runThread(thread: Thread, input: CodexWorkflowInput): Promise<string> {
   let activeThreadId = thread.id ?? null;
+  let emittedThreadId: string | null = null;
+  const emitThreadStarted = (threadId: string) => {
+    if (threadId === emittedThreadId) {
+      return;
+    }
+    emittedThreadId = threadId;
+    input.onThreadStarted?.(threadId);
+  };
   if (activeThreadId) {
     persistWorkflowThreadId(input.queueItemPath, activeThreadId);
+    emitThreadStarted(activeThreadId);
   }
 
   try {
-    const streamed = await thread.runStreamed(input.promptText);
+    const streamed = await thread.runStreamed(
+      input.promptText,
+      input.signal ? { signal: input.signal } : undefined,
+    );
     for await (const event of streamed.events) {
       if (event.type === "thread.started") {
         activeThreadId = event.thread_id;
         persistWorkflowThreadId(input.queueItemPath, activeThreadId);
+        emitThreadStarted(activeThreadId);
         continue;
       }
 
@@ -196,6 +211,7 @@ export class FakeCodexWorkflowRunner implements CodexWorkflowRunner {
 
   async startWorkflow(input: CodexWorkflowInput): Promise<CodexWorkflowHandle> {
     const threadId = `fake-thread-${++this.counter}`;
+    input.onThreadStarted?.(threadId);
     this.calls.push({ mode: "start", queueItemId: input.queueItemId, threadId });
     const manifest = await this.handler({
       mode: "start",
@@ -208,6 +224,7 @@ export class FakeCodexWorkflowRunner implements CodexWorkflowRunner {
   }
 
   async resumeWorkflow(threadId: string, input: CodexWorkflowInput): Promise<CodexWorkflowHandle> {
+    input.onThreadStarted?.(threadId);
     this.calls.push({ mode: "resume", queueItemId: input.queueItemId, threadId });
     const manifest = await this.handler({
       mode: "resume",

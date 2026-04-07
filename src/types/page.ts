@@ -96,6 +96,7 @@ export interface AgentProcessingSettings {
   apiKey: string | null;
   model: string | null;
   batchSize: number;
+  workflowTimeoutSeconds: number;
   configured: boolean;
   missing: string[];
 }
