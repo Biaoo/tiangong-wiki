@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { cleanupWorkspace, createWorkspace, readFile, readJson, runCli } from "../helpers.js";
+import { cleanupWorkspace, createWorkspace, readFile, readJson, runCli, startSynologyServer } from "../helpers.js";
 
 function stripWikiEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const next = { ...env };
@@ -12,6 +12,7 @@ function stripWikiEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
       key === "WIKI_ENV_FILE" ||
       key.startsWith("WIKI_") ||
       key.startsWith("VAULT_") ||
+      key.startsWith("SYNOLOGY_") ||
       key.startsWith("EMBEDDING_") ||
       key.startsWith("OPENROUTER_")
     ) {
@@ -51,8 +52,12 @@ function createFakeSkillsInstaller(workspaceRoot: string, mode: "success" | "fai
 
 describe("setup and doctor integration", () => {
   const workspaces: ReturnType<typeof createWorkspace>[] = [];
+  const servers: Array<{ close: () => Promise<void> }> = [];
 
-  afterEach(() => {
+  afterEach(async () => {
+    while (servers.length > 0) {
+      await servers.pop()!.close();
+    }
     while (workspaces.length > 0) {
       cleanupWorkspace(workspaces.pop()!);
     }
@@ -67,6 +72,7 @@ describe("setup and doctor integration", () => {
       PATH: [createFakeSkillsInstaller(workspace.root), process.env.PATH].filter(Boolean).join(path.delimiter),
     };
     const answers = [
+      "",
       "",
       "",
       "",
@@ -126,6 +132,81 @@ describe("setup and doctor integration", () => {
     const init = runCli(["init"], env, { cwd: workspace.root });
     expect(init.status).toBe(0);
     expect(init.stdout).toContain('"initialized": true');
+  });
+
+  it("configures Synology vault settings during setup and lets doctor probe the NAS connection", async () => {
+    const workspace = createWorkspace();
+    workspaces.push(workspace);
+
+    const server = await startSynologyServer(workspace.root, {
+      files: {
+        "/vault/briefs/spec.pdf": {
+          size: 11,
+          mtime: 1_700_000_100,
+          content: "spec-bytes",
+        },
+      },
+    });
+    servers.push(server);
+
+    const env = stripWikiEnv(workspace.env);
+    const answers = [
+      "",
+      "synology",
+      "",
+      "",
+      "",
+      "",
+      "",
+      server.baseUrl,
+      "tester",
+      "secret",
+      "/vault",
+      "",
+      "",
+      "",
+      "",
+      "n",
+      "n",
+      "n",
+      "n",
+      "n",
+      "n",
+      "",
+    ].join("\n");
+
+    const setup = runCli(["setup"], env, {
+      cwd: workspace.root,
+      input: answers,
+    });
+    expect(setup.status).toBe(0);
+    expect(setup.stdout).toContain("wiki setup complete");
+
+    const envFilePath = `${workspace.root}/.wiki.env`;
+    const envFile = readFile(envFilePath);
+    expect(envFile).toContain("VAULT_SOURCE=synology");
+    expect(envFile).toContain("VAULT_HASH_MODE=mtime");
+    expect(envFile).toContain(`SYNOLOGY_BASE_URL=${server.baseUrl}`);
+    expect(envFile).toContain("SYNOLOGY_USERNAME=tester");
+    expect(envFile).toContain("SYNOLOGY_PASSWORD=secret");
+    expect(envFile).toContain("VAULT_SYNOLOGY_REMOTE_PATH=/vault");
+    expect(envFile).toContain("SYNOLOGY_VERIFY_SSL=true");
+    expect(envFile).toContain("SYNOLOGY_READONLY=true");
+
+    const doctor = runCli(["doctor", "--probe", "--format", "json"], env, { cwd: workspace.root });
+    expect(doctor.status).toBe(0);
+    const report = readJson<{
+      ok: boolean;
+      checks: Array<{ id: string; severity: string; summary: string }>;
+    }>(doctor.stdout);
+    expect(report.ok).toBe(true);
+    expect(report.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "vault-source", severity: "ok" }),
+        expect.objectContaining({ id: "synology-config", severity: "ok" }),
+        expect.objectContaining({ id: "synology-probe", severity: "ok" }),
+      ]),
+    );
   });
 
   it("reports actionable errors when the generated runtime assets are missing", () => {
@@ -219,6 +300,7 @@ describe("setup and doctor integration", () => {
       PATH: [createFakeSkillsInstaller(workspace.root, "failure"), process.env.PATH].filter(Boolean).join(path.delimiter),
     };
     const answers = [
+      "",
       "",
       "",
       "",

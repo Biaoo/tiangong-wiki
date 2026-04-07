@@ -354,8 +354,17 @@ wiki setup
 ```
 
 它会写一个 `.wiki.env`，并把 `wiki-skill` 安装到当前 workspace 的 `.agents/skills/` 目录。
+如果你在向导里选择 `VAULT_SOURCE=synology`，setup 还会一步一步写入 `SYNOLOGY_*`、`VAULT_SYNOLOGY_REMOTE_PATH`，并把 `VAULT_PATH` 当作本地 cache 目录。
 如果你在向导里选择了 `pdf/docx/pptx/xlsx` 等 parser skills，setup 也会一并安装并记录到 `WIKI_PARSER_SKILLS`。
 后续从该工作区运行 `wiki` 命令时会自动加载这些配置。
+
+如果是 Synology 模式，建议额外运行：
+
+```bash
+wiki doctor --probe
+```
+
+它会在普通配置检查之外，再做一次轻量的 NAS 连接探测。
 
 最稳妥的做法是二选一：
 

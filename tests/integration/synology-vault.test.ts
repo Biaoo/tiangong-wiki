@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+
+import { afterEach, describe, expect, it } from "vitest";
 
 import { FakeCodexWorkflowRunner } from "../../src/core/codex-workflow.js";
 import { createPageFromTemplate, updatePageById } from "../../src/core/page-files.js";
@@ -12,25 +12,33 @@ import {
   createWorkspace,
   readFile,
   runCliJson,
+  startSynologyServer,
+  type SynologyTestState,
 } from "../helpers.js";
-
-function makeScript(workspaceRoot: string, name: string, content: string): string {
-  const scriptPath = path.join(workspaceRoot, name);
-  writeFileSync(scriptPath, content, "utf8");
-  chmodSync(scriptPath, 0o755);
-  return scriptPath;
-}
 
 describe("synology vault polling", () => {
   const workspaces: ReturnType<typeof createWorkspace>[] = [];
+  const servers: Array<{ close: () => Promise<void> }> = [];
 
-  afterEach(() => {
+  afterEach(async () => {
+    while (servers.length > 0) {
+      await servers.pop()!.close();
+    }
     while (workspaces.length > 0) {
       cleanupWorkspace(workspaces.pop()!);
     }
   });
 
-  it("indexes vault files through the Synology polling branch when using mtime hashing", () => {
+  function buildSynologyEnv(workspace: ReturnType<typeof createWorkspace>, baseUrl: string): NodeJS.ProcessEnv {
+    return {
+      ...workspace.env,
+      SYNOLOGY_BASE_URL: baseUrl,
+      SYNOLOGY_USERNAME: "tester",
+      SYNOLOGY_PASSWORD: "secret",
+    };
+  }
+
+  it("indexes vault files through the Synology polling branch when using mtime hashing", async () => {
     const workspace = createWorkspace({
       VAULT_SOURCE: "synology",
       VAULT_SYNOLOGY_REMOTE_PATH: "/vault",
@@ -38,51 +46,40 @@ describe("synology vault polling", () => {
     });
     workspaces.push(workspace);
 
-    const scriptPath = makeScript(
-      workspace.root,
-      "fake_synology.py",
-      `#!/usr/bin/env python3
-import json
-import sys
+    const server = await startSynologyServer(workspace.root, {
+      files: {
+        "/vault/projects/brief.pdf": {
+          size: 12,
+          mtime: 1_700_000_000,
+          content: "brief pdf",
+        },
+        "/vault/imports/notes.txt": {
+          size: 9,
+          mtime: 1_700_000_001,
+          content: "notes txt",
+        },
+        "/vault/imports/Thumbs.db": {
+          size: 3,
+          mtime: 1_700_000_002,
+          content: "db!",
+        },
+      },
+    });
+    servers.push(server);
 
-folder = sys.argv[sys.argv.index("--folder") + 1]
-if folder == "/vault":
-    payload = {"data": {"files": [
-        {"name": "projects", "path": "/vault/projects", "isdir": True},
-        {"name": "imports", "path": "/vault/imports", "isdir": True}
-    ]}}
-elif folder == "/vault/projects":
-    payload = {"data": {"files": [
-        {"name": "brief.pdf", "path": "/vault/projects/brief.pdf", "isdir": False, "size": 12, "additional": {"size": 12, "time": {"mtime": 1700000000}}}
-    ]}}
-elif folder == "/vault/imports":
-    payload = {"data": {"files": [
-        {"name": "notes.txt", "path": "/vault/imports/notes.txt", "isdir": False, "size": 9, "additional": {"size": 9, "time": {"mtime": 1700000001}}},
-        {"name": "Thumbs.db", "path": "/vault/imports/Thumbs.db", "isdir": False, "size": 3, "additional": {"size": 3, "time": {"mtime": 1700000002}}}
-    ]}}
-else:
-    payload = {"data": {"files": []}}
-print(json.dumps(payload))
-`,
-    );
+    const env = buildSynologyEnv(workspace, server.baseUrl);
 
-    const init = runCliJson<{ initialized: boolean }>(
-      ["init"],
-      { ...workspace.env, SYNOLOGY_FILE_STATION_SCRIPT: scriptPath },
-    );
+    const init = runCliJson<{ initialized: boolean }>(["init"], env);
     expect(init.initialized).toBe(true);
 
-    const vaultList = runCliJson<Array<{ id: string }>>(
-      ["vault", "list"],
-      { ...workspace.env, SYNOLOGY_FILE_STATION_SCRIPT: scriptPath },
-    );
+    const vaultList = runCliJson<Array<{ id: string }>>(["vault", "list"], env);
     expect(vaultList.map((item) => item.id)).toEqual(
       expect.arrayContaining(["projects/brief.pdf", "imports/notes.txt"]),
     );
     expect(vaultList.map((item) => item.id)).not.toContain("imports/Thumbs.db");
   });
 
-  it("paginates through large Synology directories", () => {
+  it("paginates through large Synology directories", async () => {
     const workspace = createWorkspace({
       VAULT_SOURCE: "synology",
       VAULT_SYNOLOGY_REMOTE_PATH: "/vault",
@@ -90,48 +87,23 @@ print(json.dumps(payload))
     });
     workspaces.push(workspace);
 
-    const scriptPath = makeScript(
-      workspace.root,
-      "fake_synology_paginated.py",
-      `#!/usr/bin/env python3
-import json
-import sys
+    const files: SynologyTestState["files"] = {};
+    for (let index = 0; index <= 1200; index += 1) {
+      files[`/vault/imports/doc-${index.toString().padStart(4, "0")}.pdf`] = {
+        size: index + 10,
+        mtime: 1_700_000_000 + index,
+        content: `doc-${index}`,
+      };
+    }
 
-def arg(name, default):
-    return sys.argv[sys.argv.index(name) + 1] if name in sys.argv else default
+    const server = await startSynologyServer(workspace.root, { files });
+    servers.push(server);
 
-folder = arg("--folder", "")
-offset = int(arg("--offset", "0"))
-limit = int(arg("--limit", "100"))
+    const env = buildSynologyEnv(workspace, server.baseUrl);
 
-if folder == "/vault":
-    payload = {"data": {"files": [
-        {"name": "imports", "path": "/vault/imports", "isdir": True}
-    ]}}
-elif folder == "/vault/imports":
-    files = []
-    for index in range(offset, min(offset + limit, 1201)):
-        files.append({
-            "name": f"doc-{index:04d}.pdf",
-            "path": f"/vault/imports/doc-{index:04d}.pdf",
-            "isdir": False,
-            "size": index + 10,
-            "additional": {"size": index + 10, "time": {"mtime": 1700000000 + index}}
-        })
-    payload = {"data": {"files": files}}
-else:
-    payload = {"data": {"files": []}}
+    runCliJson(["init"], env);
 
-print(json.dumps(payload))
-`,
-    );
-
-    runCliJson(["init"], { ...workspace.env, SYNOLOGY_FILE_STATION_SCRIPT: scriptPath });
-
-    const vaultList = runCliJson<Array<{ id: string }>>(
-      ["vault", "list"],
-      { ...workspace.env, SYNOLOGY_FILE_STATION_SCRIPT: scriptPath },
-    );
+    const vaultList = runCliJson<Array<{ id: string }>>(["vault", "list"], env);
     expect(vaultList).toHaveLength(1201);
     expect(vaultList[0]?.id).toBe("imports/doc-0000.pdf");
     expect(vaultList.at(-1)?.id).toBe("imports/doc-1200.pdf");
@@ -149,72 +121,18 @@ print(json.dumps(payload))
     });
     workspaces.push(workspace);
 
-    const statePath = path.join(workspace.root, "synology-state.json");
-    writeFileSync(
-      statePath,
-      JSON.stringify(
-        {
-          files: {
-            "/vault/report.pdf": {
-              size: 9,
-              mtime: 1700000000,
-              content: "version-1",
-            },
-          },
+    const server = await startSynologyServer(workspace.root, {
+      files: {
+        "/vault/report.pdf": {
+          size: 9,
+          mtime: 1_700_000_000,
+          content: "version-1",
         },
-        null,
-        2,
-      ),
-      "utf8",
-    );
+      },
+    });
+    servers.push(server);
 
-    const scriptPath = makeScript(
-      workspace.root,
-      "fake_synology_stateful.py",
-      `#!/usr/bin/env python3
-import json
-import os
-import sys
-from pathlib import Path
-
-state_path = os.environ["FAKE_SYNOLOGY_STATE"]
-state = json.loads(Path(state_path).read_text())
-files = state["files"]
-
-def arg(name, default):
-    return sys.argv[sys.argv.index(name) + 1] if name in sys.argv else default
-
-command = sys.argv[1]
-if command == "list":
-    folder = arg("--folder", "")
-    payload_files = []
-    for remote_path, info in files.items():
-        parent = remote_path.rsplit("/", 1)[0] or "/"
-        if folder == parent:
-            payload_files.append({
-                "name": remote_path.split("/")[-1],
-                "path": remote_path,
-                "isdir": False,
-                "size": info["size"],
-                "additional": {"size": info["size"], "time": {"mtime": info["mtime"]}}
-            })
-    print(json.dumps({"data": {"files": payload_files}}))
-elif command == "download":
-    remote_path = arg("--path", "")
-    output = arg("--output", "")
-    Path(output).parent.mkdir(parents=True, exist_ok=True)
-    Path(output).write_text(files[remote_path]["content"], encoding="utf8")
-    print(json.dumps({"success": True, "path": remote_path, "output": output}))
-else:
-    raise SystemExit(f"unsupported command: {command}")
-`,
-    );
-
-    const env = {
-      ...workspace.env,
-      SYNOLOGY_FILE_STATION_SCRIPT: scriptPath,
-      FAKE_SYNOLOGY_STATE: statePath,
-    };
+    const env = buildSynologyEnv(workspace, server.baseUrl);
 
     runCliJson(["init"], env);
 
@@ -345,28 +263,17 @@ else:
     expect(createdPage).toHaveLength(1);
     expect(readFile(path.join(workspace.wikiPath, createdPage[0].id))).toContain("version-1");
 
-    writeFileSync(
-      statePath,
-      JSON.stringify(
-        {
-          files: {
-            "/vault/report.pdf": {
-              size: 17,
-              mtime: 1700000500,
-              content: "version-2-updated",
-            },
-          },
+    server.writeState({
+      files: {
+        "/vault/report.pdf": {
+          size: 17,
+          mtime: 1_700_000_500,
+          content: "version-2-updated",
         },
-        null,
-        2,
-      ),
-      "utf8",
-    );
+      },
+    });
 
-    const syncResult = runCliJson<{ vault: { changes: number; queue: { pendingReset: number } } }>(
-      ["sync"],
-      env,
-    );
+    const syncResult = runCliJson<{ vault: { changes: number; queue: { pendingReset: number } } }>(["sync"], env);
     expect(syncResult.vault.changes).toBe(1);
     expect(syncResult.vault.queue.pendingReset).toBe(1);
 

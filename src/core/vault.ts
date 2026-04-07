@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 
+import { type SynologyClient, type SynologyListItem, normalizeSynologyRemotePath, withSynologyClient } from "./synology.js";
 import type { VaultChange, VaultFile, VaultHashMode } from "../types/page.js";
 import { AppError } from "../utils/errors.js";
 import {
@@ -15,26 +16,6 @@ import {
   writeTextFileSync,
 } from "../utils/fs.js";
 import { toOffsetIso } from "../utils/time.js";
-
-interface SynologyListItem {
-  name?: string;
-  path?: string;
-  real_path?: string;
-  isdir?: boolean;
-  type?: string;
-  size?: number;
-  additional?: {
-    real_path?: string;
-    size?: number;
-    time?: {
-      mtime?: number;
-    };
-    type?: string;
-  };
-  time?: {
-    mtime?: number;
-  };
-}
 
 interface SynologyCacheMetadata {
   remotePath: string;
@@ -93,15 +74,6 @@ function localVaultFiles(vaultPath: string, hashMode: VaultHashMode, vaultFileTy
       indexedAt,
     };
   });
-}
-
-function getSynologyScriptPath(packageRoot: string, env: NodeJS.ProcessEnv): string {
-  const override = env.SYNOLOGY_FILE_STATION_SCRIPT;
-  if (override) {
-    return override;
-  }
-
-  return path.resolve(packageRoot, "..", "synology-file-station", "scripts", "synology_file_station.py");
 }
 
 function getExtractionScriptPath(packageRoot: string): string {
@@ -170,22 +142,6 @@ function isSynologyCacheFresh(localPath: string, file: VaultFile): boolean {
   );
 }
 
-function parseSynologyItems(payload: unknown): SynologyListItem[] {
-  if (!payload || typeof payload !== "object") {
-    return [];
-  }
-
-  const data = (payload as { data?: { files?: unknown; items?: unknown } }).data;
-  if (Array.isArray(data?.files)) {
-    return data.files as SynologyListItem[];
-  }
-  if (Array.isArray(data?.items)) {
-    return data.items as SynologyListItem[];
-  }
-
-  return [];
-}
-
 function parseJsonPayload(raw: string): unknown {
   try {
     return JSON.parse(raw) as unknown;
@@ -197,75 +153,32 @@ function parseJsonPayload(raw: string): unknown {
   }
 }
 
-function listSynologyFolderPage(
-  scriptPath: string,
-  folder: string,
-  offset: number,
-  limit: number,
-): SynologyListItem[] {
-  const raw = execFileSync(
-    "python3",
-    [
-      scriptPath,
-      "list",
-      "--folder",
-      folder,
-      "--filetype",
-      "all",
-      "--offset",
-      String(offset),
-      "--limit",
-      String(limit),
-    ],
-    {
-      encoding: "utf8",
-    },
-  );
-  const payload = parseJsonPayload(raw);
-  return parseSynologyItems(payload);
+function getSynologyItemPath(item: SynologyListItem): string | null {
+  const candidate = item.path ?? item.real_path ?? item.additional?.real_path;
+  return typeof candidate === "string" && candidate.length > 0 ? candidate : null;
 }
 
-function listSynologyFolderAll(scriptPath: string, folder: string): SynologyListItem[] {
-  const results: SynologyListItem[] = [];
-  const pageSize = 500;
-  let offset = 0;
-
-  while (true) {
-    const items = listSynologyFolderPage(scriptPath, folder, offset, pageSize);
-    if (items.length === 0) {
-      break;
-    }
-
-    results.push(...items);
-    if (items.length < pageSize) {
-      break;
-    }
-    offset += pageSize;
-  }
-
-  return results;
+function isSynologyDirectory(item: SynologyListItem): boolean {
+  return item.isdir === true || item.type === "dir" || item.additional?.type === "dir";
 }
 
-function scanSynologyFolder(
-  scriptPath: string,
+async function scanSynologyFolder(
+  client: SynologyClient,
   remoteRoot: string,
   currentFolder: string,
   results: VaultFile[],
-  hashMode: VaultHashMode,
   allowedFileTypes: Set<string>,
-): void {
+): Promise<void> {
   const indexedAt = toOffsetIso();
-  const items = listSynologyFolderAll(scriptPath, currentFolder);
+  const items = await client.listFolderAll(currentFolder);
   for (const item of items) {
-    const filePath = item.path ?? item.real_path ?? item.additional?.real_path;
+    const filePath = getSynologyItemPath(item);
     if (!filePath) {
       continue;
     }
 
-    const isDirectory =
-      item.isdir === true || item.type === "dir" || item.additional?.type === "dir";
-    if (isDirectory) {
-      scanSynologyFolder(scriptPath, remoteRoot, filePath, results, hashMode, allowedFileTypes);
+    if (isSynologyDirectory(item)) {
+      await scanSynologyFolder(client, remoteRoot, filePath, results, allowedFileTypes);
       continue;
     }
 
@@ -273,9 +186,10 @@ function scanSynologyFolder(
       continue;
     }
 
-    const relativeId = filePath
-      .replace(new RegExp(`^${remoteRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/?`), "")
-      .replace(/^\/+/, "");
+    const relativeId = path.posix.relative(remoteRoot, filePath).replace(/^\/+/, "");
+    if (!relativeId || relativeId.startsWith("../")) {
+      continue;
+    }
     const fileExt = normalizeVaultFileExtension(filePath);
     const fileSize = Number(item.additional?.size ?? item.size ?? 0);
     const fileMtime = Number(item.additional?.time?.mtime ?? item.time?.mtime ?? 0);
@@ -287,38 +201,41 @@ function scanSynologyFolder(
       sourceType: fileExt,
       fileSize,
       filePath,
-      contentHash:
-        hashMode === "mtime"
-          ? sha256Text(`${relativeId}:${filePath}:${fileSize}:${fileMtime}`)
-          : sha256Text(`${relativeId}:${filePath}:${fileSize}:${fileMtime}`),
+      contentHash: sha256Text(`${relativeId}:${filePath}:${fileSize}:${fileMtime}`),
       fileMtime,
       indexedAt,
     });
   }
 }
 
-function synologyVaultFiles(
+async function synologyVaultFiles(
   remoteRoot: string,
   vaultPath: string,
-  packageRoot: string,
   env: NodeJS.ProcessEnv,
   hashMode: VaultHashMode,
   vaultFileTypes: readonly string[],
-): VaultFile[] {
-  const scriptPath = getSynologyScriptPath(packageRoot, env);
+): Promise<VaultFile[]> {
   const results: VaultFile[] = [];
-  const normalizedRoot = remoteRoot.replace(/\/+$/g, "");
+  const normalizedRoot = normalizeSynologyRemotePath(remoteRoot);
   const allowedFileTypes = createAllowedVaultFileTypeSet(vaultFileTypes);
-  scanSynologyFolder(scriptPath, normalizedRoot, normalizedRoot, results, hashMode, allowedFileTypes);
-  const sorted = results.sort((left, right) => left.id.localeCompare(right.id));
-  if (hashMode !== "content") {
-    return sorted;
-  }
 
-  return sorted.map((file) => ({
-    ...file,
-    contentHash: sha256FileSync(ensureLocalVaultFile(file, vaultPath, packageRoot, env)),
-  }));
+  return withSynologyClient(env, async (client) => {
+    await scanSynologyFolder(client, normalizedRoot, normalizedRoot, results, allowedFileTypes);
+    const sorted = results.sort((left, right) => left.id.localeCompare(right.id));
+    if (hashMode !== "content") {
+      return sorted;
+    }
+
+    const hashed: VaultFile[] = [];
+    for (const file of sorted) {
+      const localPath = await ensureLocalVaultFile(file, vaultPath, env, client);
+      hashed.push({
+        ...file,
+        contentHash: sha256FileSync(localPath),
+      });
+    }
+    return hashed;
+  });
 }
 
 function getExistingVaultFiles(db: Database.Database): Map<string, VaultFile> {
@@ -370,12 +287,11 @@ export function getVaultQueuePriority(fileExt: string | null): number {
   return 20;
 }
 
-export function collectVaultFiles(
+export async function collectVaultFiles(
   vaultPath: string,
-  packageRoot: string,
   vaultFileTypes: readonly string[],
   env: NodeJS.ProcessEnv = process.env,
-): VaultFile[] {
+): Promise<VaultFile[]> {
   const source = (env.VAULT_SOURCE ?? "local").trim().toLowerCase();
   const hashMode = ((env.VAULT_HASH_MODE ?? "content").trim().toLowerCase() === "mtime"
     ? "mtime"
@@ -386,18 +302,18 @@ export function collectVaultFiles(
       throw new AppError("VAULT_SYNOLOGY_REMOTE_PATH is required when VAULT_SOURCE=synology", "config");
     }
 
-    return synologyVaultFiles(remotePath, vaultPath, packageRoot, env, hashMode, vaultFileTypes);
+    return synologyVaultFiles(remotePath, vaultPath, env, hashMode, vaultFileTypes);
   }
 
   return localVaultFiles(vaultPath, hashMode, vaultFileTypes);
 }
 
-export function ensureLocalVaultFile(
+export async function ensureLocalVaultFile(
   file: VaultFile,
   vaultPath: string,
-  packageRoot: string,
   env: NodeJS.ProcessEnv = process.env,
-): string {
+  client?: SynologyClient,
+): Promise<string> {
   const source = (env.VAULT_SOURCE ?? "local").trim().toLowerCase();
   if (source !== "synology") {
     return file.filePath;
@@ -414,16 +330,15 @@ export function ensureLocalVaultFile(
   }
 
   ensureDirSync(path.dirname(localPath));
-  const remotePath = path.posix.join(remoteRoot.replace(/\/+$/g, ""), file.id);
-  const scriptPath = getSynologyScriptPath(packageRoot, env);
-  execFileSync(
-    "python3",
-    [scriptPath, "download", "--path", remotePath, "--output", localPath],
-    {
-      encoding: "utf8",
-      env,
-    },
-  );
+  const remotePath = path.posix.join(normalizeSynologyRemotePath(remoteRoot), file.id);
+
+  if (client) {
+    await client.downloadFile(remotePath, localPath);
+  } else {
+    await withSynologyClient(env, async (synologyClient) => {
+      await synologyClient.downloadFile(remotePath, localPath);
+    });
+  }
   writeSynologyCacheMetadata(localPath, file);
   return localPath;
 }

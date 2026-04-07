@@ -156,14 +156,39 @@ node dist/index.js --version
 
 `npm link` 会在全局 bin 目录创建 `wiki` 符号链接，指向当前目录的 `dist/index.js`。卸载用 `npm unlink -g @tiangong-lca/wiki`。
 
+### 作为 Codex Skill 安装
+
+wiki-skill 同时是一个标准的 [Agent Skill](https://github.com/vercel-labs/skills)，可以通过 `npx skills add` 注册到 AI Agent。
+
+```bash
+# 1. 先安装 npm 包（提供 wiki CLI + 编译产物 + native 依赖）
+npm install -g @tiangong-lca/wiki
+
+# 2. 将 skill 注册到 agent（symlink SKILL.md + references/ 等到 agent skills 目录）
+npx skills add Biaoo/wiki -a codex           # Codex agent
+npx skills add Biaoo/wiki -a claude-code      # Claude Code
+npx skills add Biaoo/wiki -a codex -g         # 全局安装（跨项目可用）
+```
+
+步骤 1 是必须的——`npx skills add` 只做文件 symlink，不会执行 `npm install` 或 `npm run build`。
+
+也可以跳过手动注册，用 `wiki setup` 自动完成 skill 安装到当前 workspace：
+
+```bash
+wiki setup    # 交互式向导，自动将 wiki-skill 安装到 workspace/.agents/skills/，并可选择 local / Synology vault
+```
+
+安装后 agent 可以通过 `SKILL.md` 中的 `name` 和 `description` 自动发现并触发 wiki-skill。
+
 ## 快速开始
 
 ```bash
 # 运行完整配置向导（写入 .wiki.env，并安装 workspace-local skills）
 wiki setup
 
-# 自检（含 workspace-local skills）
+# 自检（含 workspace-local skills；如使用 Synology 可加 --probe）
 wiki doctor
+wiki doctor --probe
 
 # 初始化工作区
 wiki init
@@ -186,6 +211,7 @@ wiki graph bayes-theorem --depth 2
 - `wiki setup` 会写入当前工作目录下的 `.wiki.env`
 - `wiki setup` 会把 `wiki-skill` 安装到 `workspace/.agents/skills/wiki-skill`
 - 如果你选了 parser skills，setup 也会把它们安装到 `workspace/.agents/skills/`
+- 如果你选了 `VAULT_SOURCE=synology`，setup 还会写入 `SYNOLOGY_*` 与 `VAULT_SYNOLOGY_REMOTE_PATH`
 - CLI 启动时会自动发现最近的 `.wiki.env`
 - 也可以显式设置 `WIKI_ENV_FILE=/absolute/path/to/.wiki.env`
 
@@ -193,7 +219,15 @@ wiki graph bayes-theorem --depth 2
 |------|------|------|
 | `WIKI_ENV_FILE` | 否 | 显式指定要加载的 `.wiki.env` 文件 |
 | `WIKI_PATH` | 是 | 知识库页面目录（精确到 `pages/`） |
-| `VAULT_PATH` | 否 | 外部素材目录（默认 `../vault`） |
+| `VAULT_PATH` | 否 | 外部素材目录（默认 `../vault`）；在 Synology 模式下是本地 cache 目录 |
+| `VAULT_SOURCE` | 否 | `local` 或 `synology` |
+| `VAULT_HASH_MODE` | 否 | `content` 或 `mtime`；Synology 推荐 `mtime` |
+| `VAULT_SYNOLOGY_REMOTE_PATH` | 否 | Synology vault 远端目录 |
+| `SYNOLOGY_BASE_URL` | 否 | Synology DSM 地址 |
+| `SYNOLOGY_USERNAME` | 否 | Synology DSM 用户名 |
+| `SYNOLOGY_PASSWORD` | 否 | Synology DSM 密码 |
+| `SYNOLOGY_VERIFY_SSL` | 否 | 是否校验 DSM TLS 证书 |
+| `SYNOLOGY_READONLY` | 否 | Synology 安全策略开关；setup 默认写 `true` |
 | `WIKI_DB_PATH` | 否 | SQLite 数据库路径（默认 `../index.db`） |
 | `WIKI_CONFIG_PATH` | 否 | 配置文件路径（默认 `../wiki.config.json`） |
 | `WIKI_PARSER_SKILLS` | 否 | 由 `wiki setup` 写入的逗号分隔 parser skill 列表，供 `wiki doctor` 校验 |

@@ -7,7 +7,7 @@ export function registerDoctorCommand(program: Command): void {
   program
     .command("doctor")
     .description("Diagnose the current wiki configuration and runtime health")
-    .option("--probe", "Probe the embedding endpoint when configured")
+    .option("--probe", "Probe configured remote services such as embeddings and Synology NAS")
     .option("--format <format>", "Output format: text or json", "text")
     .action(async (options) => {
       const format = ensureTextOrJson(options.format);

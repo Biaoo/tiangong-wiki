@@ -217,9 +217,8 @@ export async function syncWorkspace(options: SyncOptions = {}): Promise<SyncResu
     };
     if (mode === "full") {
       syncId = makeSyncId();
-      const currentVaultFiles = collectVaultFiles(
+      const currentVaultFiles = await collectVaultFiles(
         runtimePaths.vaultPath,
-        runtimePaths.packageRoot,
         config.vaultFileTypes,
         env,
       );

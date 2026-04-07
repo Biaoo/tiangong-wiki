@@ -6,7 +6,8 @@ import { fileURLToPath } from "node:url";
 import { DEFAULT_WIKI_ENV_FILE, getCliEnvironmentInfo, parseEnvFile, serializeEnvEntries } from "./cli-env.js";
 import { resolveTemplateFilePath, loadConfig } from "./config.js";
 import { EmbeddingClient } from "./embedding.js";
-import { resolveAgentSettings } from "./paths.js";
+import { parseVaultHashMode, resolveAgentSettings } from "./paths.js";
+import { loadSynologyConfigFromEnv, normalizeSynologyRemotePath, withSynologyClient } from "./synology.js";
 import {
   ensureWikiSkillInstall,
   formatParserSkills,
@@ -25,6 +26,7 @@ import { AppError } from "../utils/errors.js";
 import { pathExistsSync, writeTextFileSync } from "../utils/fs.js";
 
 export type DoctorSeverity = "ok" | "warn" | "error";
+type VaultSource = "local" | "synology";
 
 export interface DoctorCheck {
   id: string;
@@ -66,8 +68,16 @@ export interface DoctorReport {
 
 interface SetupValues {
   envFilePath: string;
+  vaultSource: VaultSource;
   wikiPath: string;
   vaultPath: string;
+  vaultHashMode: "content" | "mtime";
+  synologyBaseUrl: string | null;
+  synologyUsername: string | null;
+  synologyPassword: string | null;
+  synologyRemotePath: string | null;
+  synologyVerifySsl: boolean;
+  synologyReadonly: boolean;
   dbPath: string;
   configPath: string;
   templatesPath: string;
@@ -109,10 +119,18 @@ interface PromptDriver {
 const MANAGED_ENV_KEYS = new Set([
   "WIKI_PATH",
   "VAULT_PATH",
+  "VAULT_SOURCE",
+  "VAULT_HASH_MODE",
+  "VAULT_SYNOLOGY_REMOTE_PATH",
   "WIKI_DB_PATH",
   "WIKI_CONFIG_PATH",
   "WIKI_TEMPLATES_PATH",
   "WIKI_SYNC_INTERVAL",
+  "SYNOLOGY_BASE_URL",
+  "SYNOLOGY_USERNAME",
+  "SYNOLOGY_PASSWORD",
+  "SYNOLOGY_VERIFY_SSL",
+  "SYNOLOGY_READONLY",
   "EMBEDDING_BASE_URL",
   "EMBEDDING_API_KEY",
   "EMBEDDING_MODEL",
@@ -135,6 +153,47 @@ function resolvePackageRoot(packageRoot?: string): string {
 
 function resolveInputPath(value: string, cwd: string): string {
   return path.resolve(cwd, value.trim());
+}
+
+function normalizeVaultSource(rawValue: string | undefined): VaultSource {
+  const normalized = (rawValue ?? "local").trim().toLowerCase();
+  if (!normalized || normalized === "local") {
+    return "local";
+  }
+  if (normalized === "synology") {
+    return "synology";
+  }
+  throw new AppError(`VAULT_SOURCE must be "local" or "synology", got ${rawValue}`, "config");
+}
+
+function safeVaultSource(rawValue: string | undefined): VaultSource {
+  try {
+    return normalizeVaultSource(rawValue);
+  } catch {
+    return "local";
+  }
+}
+
+function safeVaultHashMode(rawValue: string | undefined, defaultValue: "content" | "mtime"): "content" | "mtime" {
+  try {
+    return parseVaultHashMode(rawValue);
+  } catch {
+    return defaultValue;
+  }
+}
+
+function safeBooleanFlag(rawValue: string | undefined, defaultValue: boolean): boolean {
+  if (rawValue === undefined || rawValue.trim().length === 0) {
+    return defaultValue;
+  }
+  const normalized = rawValue.trim().toLowerCase();
+  if (["1", "true", "yes", "on", "y"].includes(normalized)) {
+    return true;
+  }
+  if (["0", "false", "no", "off", "n"].includes(normalized)) {
+    return false;
+  }
+  return defaultValue;
 }
 
 function validateNonNegativeInteger(rawValue: string, label: string): string | null {
@@ -277,6 +336,48 @@ async function promptYesNo(
   }
 }
 
+function formatStep(index: number, total: number, title: string): string {
+  return `Step ${index}/${total}: ${title}`;
+}
+
+async function promptVaultSource(
+  driver: PromptDriver,
+  ctx: PromptContext,
+  defaultValue: VaultSource,
+): Promise<VaultSource> {
+  const value = await promptText(driver, ctx, "VAULT_SOURCE (local/synology)", defaultValue, {
+    validator: (candidate) => {
+      try {
+        normalizeVaultSource(candidate);
+        return null;
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+      }
+    },
+    normalize: (candidate) => normalizeVaultSource(candidate),
+  });
+  return value as VaultSource;
+}
+
+async function promptVaultHashMode(
+  driver: PromptDriver,
+  ctx: PromptContext,
+  defaultValue: "content" | "mtime",
+): Promise<"content" | "mtime"> {
+  const value = await promptText(driver, ctx, "VAULT_HASH_MODE", defaultValue, {
+    validator: (candidate) => {
+      try {
+        parseVaultHashMode(candidate);
+        return null;
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+      }
+    },
+    normalize: (candidate) => parseVaultHashMode(candidate),
+  });
+  return value as "content" | "mtime";
+}
+
 function canReadWrite(targetPath: string): boolean {
   accessSync(targetPath, constants.R_OK | constants.W_OK);
   return true;
@@ -298,17 +399,27 @@ function collectDoctorCheck(
 }
 
 function getPathDefaults(env: NodeJS.ProcessEnv, cwd: string): SetupValues {
+  const vaultSource = safeVaultSource(env.VAULT_SOURCE);
   const wikiRoot = env.WIKI_PATH ? path.resolve(env.WIKI_PATH, "..") : path.join(cwd, "wiki");
   const wikiPath = env.WIKI_PATH ? path.resolve(env.WIKI_PATH) : path.join(wikiRoot, "pages");
   const vaultPath = env.VAULT_PATH ? path.resolve(env.VAULT_PATH) : path.join(cwd, "vault");
   const dbPath = env.WIKI_DB_PATH ? path.resolve(env.WIKI_DB_PATH) : path.join(wikiRoot, "index.db");
   const configPath = env.WIKI_CONFIG_PATH ? path.resolve(env.WIKI_CONFIG_PATH) : path.join(wikiRoot, "wiki.config.json");
   const templatesPath = env.WIKI_TEMPLATES_PATH ? path.resolve(env.WIKI_TEMPLATES_PATH) : path.join(wikiRoot, "templates");
+  const defaultHashMode = vaultSource === "synology" ? "mtime" : "content";
 
   return {
     envFilePath: env.WIKI_ENV_FILE ? path.resolve(cwd, env.WIKI_ENV_FILE) : path.join(cwd, DEFAULT_WIKI_ENV_FILE),
+    vaultSource,
     wikiPath,
     vaultPath,
+    vaultHashMode: safeVaultHashMode(env.VAULT_HASH_MODE, defaultHashMode),
+    synologyBaseUrl: env.SYNOLOGY_BASE_URL ?? env.SYNOLOGY_URL ?? null,
+    synologyUsername: env.SYNOLOGY_USERNAME ?? env.SYNOLOGY_USER ?? null,
+    synologyPassword: env.SYNOLOGY_PASSWORD ?? env.SYNOLOGY_PASS ?? null,
+    synologyRemotePath: env.VAULT_SYNOLOGY_REMOTE_PATH ?? null,
+    synologyVerifySsl: safeBooleanFlag(env.SYNOLOGY_VERIFY_SSL, true),
+    synologyReadonly: safeBooleanFlag(env.SYNOLOGY_READONLY, true),
     dbPath,
     configPath,
     templatesPath,
@@ -463,6 +574,67 @@ async function collectAgentSettings(
   };
 }
 
+async function collectSynologySettings(
+  driver: PromptDriver,
+  ctx: PromptContext,
+  defaults: SetupValues,
+): Promise<Pick<
+  SetupValues,
+  "vaultHashMode" | "synologyBaseUrl" | "synologyUsername" | "synologyPassword" | "synologyRemotePath" | "synologyVerifySsl" | "synologyReadonly"
+>> {
+  const synologyBaseUrl = await promptText(
+    driver,
+    ctx,
+    "SYNOLOGY_BASE_URL",
+    defaults.synologyBaseUrl ?? "https://nas.example.com:5001",
+    { validator: (value) => validateUrl(value, "SYNOLOGY_BASE_URL") },
+  );
+  const synologyUsername = await promptText(
+    driver,
+    ctx,
+    "SYNOLOGY_USERNAME",
+    defaults.synologyUsername ?? "",
+    { required: true },
+  );
+  const synologyPassword = await promptText(
+    driver,
+    ctx,
+    "SYNOLOGY_PASSWORD",
+    defaults.synologyPassword ?? "",
+    { required: true },
+  );
+  const synologyRemotePath = await promptText(
+    driver,
+    ctx,
+    "VAULT_SYNOLOGY_REMOTE_PATH",
+    defaults.synologyRemotePath ?? "/homes/user/wiki-vault",
+    {
+      validator: (value) => {
+        try {
+          normalizeSynologyRemotePath(value);
+          return null;
+        } catch (error) {
+          return error instanceof Error ? error.message : String(error);
+        }
+      },
+      normalize: (value) => normalizeSynologyRemotePath(value),
+    },
+  );
+  const vaultHashMode = await promptVaultHashMode(driver, ctx, "mtime");
+  const synologyVerifySsl = await promptYesNo(driver, ctx, "SYNOLOGY_VERIFY_SSL", defaults.synologyVerifySsl);
+  const synologyReadonly = await promptYesNo(driver, ctx, "SYNOLOGY_READONLY", defaults.synologyReadonly);
+
+  return {
+    vaultHashMode,
+    synologyBaseUrl,
+    synologyUsername,
+    synologyPassword,
+    synologyRemotePath,
+    synologyVerifySsl,
+    synologyReadonly,
+  };
+}
+
 async function collectParserSkillSettings(
   driver: PromptDriver,
   ctx: PromptContext,
@@ -496,8 +668,10 @@ function buildSetupSummary(values: SetupValues): string {
     "Configuration summary",
     `  WIKI_ENV_FILE: ${values.envFilePath}`,
     `  WORKSPACE_ROOT: ${workspaceRoot}`,
+    `  VAULT_SOURCE: ${values.vaultSource}`,
     `  WIKI_PATH: ${values.wikiPath}`,
-    `  VAULT_PATH: ${values.vaultPath}`,
+    `  VAULT_PATH: ${values.vaultPath}${values.vaultSource === "synology" ? " (local cache)" : ""}`,
+    `  VAULT_HASH_MODE: ${values.vaultHashMode}`,
     `  WIKI_DB_PATH: ${values.dbPath}`,
     `  WIKI_CONFIG_PATH: ${values.configPath}`,
     `  WIKI_TEMPLATES_PATH: ${values.templatesPath}`,
@@ -521,6 +695,14 @@ function buildSetupSummary(values: SetupValues): string {
     lines.push(`  WIKI_AGENT_BATCH_SIZE: ${values.agentBatchSize}`);
   }
 
+  if (values.vaultSource === "synology") {
+    lines.push(`  SYNOLOGY_BASE_URL: ${values.synologyBaseUrl}`);
+    lines.push(`  SYNOLOGY_USERNAME: ${values.synologyUsername}`);
+    lines.push(`  VAULT_SYNOLOGY_REMOTE_PATH: ${values.synologyRemotePath}`);
+    lines.push(`  SYNOLOGY_VERIFY_SSL: ${values.synologyVerifySsl ? "true" : "false"}`);
+    lines.push(`  SYNOLOGY_READONLY: ${values.synologyReadonly ? "true" : "false"}`);
+  }
+
   return lines.join("\n");
 }
 
@@ -532,10 +714,18 @@ function writeSetupEnvFile(values: SetupValues): void {
   const managedEntries: Array<[string, string | null | undefined]> = [
     ["WIKI_PATH", values.wikiPath],
     ["VAULT_PATH", values.vaultPath],
+    ["VAULT_SOURCE", values.vaultSource],
+    ["VAULT_HASH_MODE", values.vaultHashMode],
+    ["VAULT_SYNOLOGY_REMOTE_PATH", values.vaultSource === "synology" ? values.synologyRemotePath : null],
     ["WIKI_DB_PATH", values.dbPath],
     ["WIKI_CONFIG_PATH", values.configPath],
     ["WIKI_TEMPLATES_PATH", values.templatesPath],
     ["WIKI_SYNC_INTERVAL", values.syncInterval],
+    ["SYNOLOGY_BASE_URL", values.vaultSource === "synology" ? values.synologyBaseUrl : null],
+    ["SYNOLOGY_USERNAME", values.vaultSource === "synology" ? values.synologyUsername : null],
+    ["SYNOLOGY_PASSWORD", values.vaultSource === "synology" ? values.synologyPassword : null],
+    ["SYNOLOGY_VERIFY_SSL", values.vaultSource === "synology" ? String(values.synologyVerifySsl) : null],
+    ["SYNOLOGY_READONLY", values.vaultSource === "synology" ? String(values.synologyReadonly) : null],
     ["EMBEDDING_BASE_URL", values.embeddingEnabled ? values.embeddingBaseUrl : null],
     ["EMBEDDING_API_KEY", values.embeddingEnabled ? values.embeddingApiKey : null],
     ["EMBEDDING_MODEL", values.embeddingEnabled ? values.embeddingModel : null],
@@ -574,19 +764,29 @@ export async function runSetupWizard(
   const ctx: PromptContext = { cwd, output };
 
   try {
-    writeSection(output, "Step 1/7: Configuration file");
+    writeSection(output, "Step 1: Configuration file");
     const envFilePath = await promptText(driver, ctx, "Path for the generated .wiki.env file", defaults.envFilePath, {
       normalize: (value) => resolveInputPath(value, cwd),
     });
 
-    writeSection(output, "Step 2/7: Core paths");
+    writeSection(output, "Step 2: Vault source");
+    const vaultSource = await promptVaultSource(driver, ctx, defaults.vaultSource);
+    const totalSteps = vaultSource === "synology" ? 9 : 8;
+
+    writeSection(output, formatStep(3, totalSteps, "Core paths"));
     const wikiPath = await promptText(driver, ctx, "WIKI_PATH", defaults.wikiPath, {
       normalize: (value) => resolveInputPath(value, cwd),
       validator: (value) => validateWikiPath(resolveInputPath(value, cwd)),
     });
-    const vaultPath = await promptText(driver, ctx, "VAULT_PATH", defaults.vaultPath, {
-      normalize: (value) => resolveInputPath(value, cwd),
-    });
+    const vaultPath = await promptText(
+      driver,
+      ctx,
+      vaultSource === "synology" ? "VAULT_PATH (local cache directory)" : "VAULT_PATH",
+      defaults.vaultPath,
+      {
+        normalize: (value) => resolveInputPath(value, cwd),
+      },
+    );
     const dbPath = await promptText(driver, ctx, "WIKI_DB_PATH", defaults.dbPath, {
       normalize: (value) => resolveInputPath(value, cwd),
     });
@@ -597,24 +797,46 @@ export async function runSetupWizard(
       normalize: (value) => resolveInputPath(value, cwd),
     });
 
-    writeSection(output, "Step 3/7: Sync schedule");
+    let synologyValues: Pick<
+      SetupValues,
+      "vaultHashMode" | "synologyBaseUrl" | "synologyUsername" | "synologyPassword" | "synologyRemotePath" | "synologyVerifySsl" | "synologyReadonly"
+    >;
+    if (vaultSource === "synology") {
+      writeSection(output, formatStep(4, totalSteps, "Synology NAS"));
+      output.write("Synology mode uses VAULT_PATH as the local cache directory for downloaded vault files.\n");
+      synologyValues = await collectSynologySettings(driver, ctx, defaults);
+    } else {
+      synologyValues = {
+        vaultHashMode: defaults.vaultSource === "local" ? defaults.vaultHashMode : "content",
+        synologyBaseUrl: null,
+        synologyUsername: null,
+        synologyPassword: null,
+        synologyRemotePath: null,
+        synologyVerifySsl: defaults.synologyVerifySsl,
+        synologyReadonly: defaults.synologyReadonly,
+      };
+    }
+
+    writeSection(output, formatStep(vaultSource === "synology" ? 5 : 4, totalSteps, "Sync schedule"));
     const syncInterval = await promptText(driver, ctx, "WIKI_SYNC_INTERVAL (seconds)", defaults.syncInterval, {
       validator: (value) => validateNonNegativeInteger(value, "WIKI_SYNC_INTERVAL"),
     });
 
-    writeSection(output, "Step 4/7: Embedding configuration");
+    writeSection(output, formatStep(vaultSource === "synology" ? 6 : 5, totalSteps, "Embedding configuration"));
     const embedding = await collectEmbeddingSettings(driver, ctx, defaults, env);
 
-    writeSection(output, "Step 5/7: Automatic vault processing");
+    writeSection(output, formatStep(vaultSource === "synology" ? 7 : 6, totalSteps, "Automatic vault processing"));
     const agent = await collectAgentSettings(driver, ctx, defaults);
 
-    writeSection(output, "Step 6/7: Codex skills");
+    writeSection(output, formatStep(vaultSource === "synology" ? 8 : 7, totalSteps, "Codex skills"));
     const parserSkills = await collectParserSkillSettings(driver, ctx, defaults, wikiPath);
 
     const values: SetupValues = {
       envFilePath,
+      vaultSource,
       wikiPath,
       vaultPath,
+      ...synologyValues,
       dbPath,
       configPath,
       templatesPath,
@@ -624,7 +846,7 @@ export async function runSetupWizard(
       parserSkills,
     };
 
-    writeSection(output, "Step 7/7: Confirm");
+    writeSection(output, formatStep(totalSteps, totalSteps, "Confirm"));
     output.write(`${buildSetupSummary(values)}\n`);
     const confirmed = await promptYesNo(driver, ctx, "Write configuration and scaffold workspace assets?", true);
     if (!confirmed) {
@@ -667,6 +889,9 @@ export async function runSetupWizard(
         "Next steps:",
         "- Run `wiki doctor` to validate the generated configuration.",
         "- Run `wiki init` to create index.db and perform the first sync.",
+        ...(values.vaultSource === "synology"
+          ? ["- Protect `.wiki.env` carefully because it now stores Synology credentials."]
+          : []),
         ...(values.agentEnabled
           ? ["- Start the background service with `wiki daemon start` or `wiki daemon run` once init succeeds."]
           : []),
@@ -785,6 +1010,131 @@ function inspectDbPath(checks: DoctorCheck[], dbPath: string | null): void {
     `index.db cannot be created at ${dbPath}`,
     `Ensure ${parentDir} exists and is writable, or rerun \`wiki setup\`.`,
   );
+}
+
+async function inspectVaultSource(
+  checks: DoctorCheck[],
+  env: NodeJS.ProcessEnv,
+  probe: boolean,
+): Promise<void> {
+  let source: VaultSource;
+  try {
+    source = normalizeVaultSource(env.VAULT_SOURCE);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    collectDoctorCheck(
+      checks,
+      "error",
+      "vault-source",
+      message,
+      "Set VAULT_SOURCE to local or synology, or rerun `wiki setup`.",
+    );
+    return;
+  }
+
+  let hashMode: "content" | "mtime";
+  let hashModeValid = true;
+  try {
+    hashMode = parseVaultHashMode(env.VAULT_HASH_MODE);
+  } catch (error) {
+    hashModeValid = false;
+    const message = error instanceof Error ? error.message : String(error);
+    collectDoctorCheck(
+      checks,
+      "error",
+      "vault-hash-mode",
+      message,
+      "Set VAULT_HASH_MODE to content or mtime, or rerun `wiki setup`.",
+    );
+    hashMode = source === "synology" ? "mtime" : "content";
+  }
+
+  if (hashModeValid) {
+    collectDoctorCheck(
+      checks,
+      "ok",
+      "vault-source",
+      `Vault source is ${source} with ${hashMode} hash mode.`,
+    );
+  }
+
+  if (source !== "synology") {
+    return;
+  }
+
+  let remotePath: string;
+  try {
+    remotePath = normalizeSynologyRemotePath(env.VAULT_SYNOLOGY_REMOTE_PATH);
+    collectDoctorCheck(
+      checks,
+      "ok",
+      "synology-remote-path",
+      `Synology vault remote path is configured: ${remotePath}`,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    collectDoctorCheck(
+      checks,
+      "error",
+      "synology-remote-path",
+      message,
+      "Set VAULT_SYNOLOGY_REMOTE_PATH to the remote vault directory, or rerun `wiki setup`.",
+    );
+    return;
+  }
+
+  let config;
+  try {
+    config = loadSynologyConfigFromEnv(env);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    collectDoctorCheck(
+      checks,
+      "error",
+      "synology-config",
+      message,
+      "Set the required SYNOLOGY_* variables in `.wiki.env` or rerun `wiki setup`.",
+    );
+    return;
+  }
+
+  if (!probe) {
+    collectDoctorCheck(
+      checks,
+      "ok",
+      "synology-config",
+      `Synology connection settings are configured for ${config.baseUrl} (verify SSL: ${config.verifySsl ? "true" : "false"}, readonly: ${config.readonly ? "true" : "false"}).`,
+    );
+    return;
+  }
+
+  collectDoctorCheck(
+    checks,
+    "ok",
+    "synology-config",
+    `Synology connection settings are configured for ${config.baseUrl} (verify SSL: ${config.verifySsl ? "true" : "false"}, readonly: ${config.readonly ? "true" : "false"}).`,
+  );
+
+  try {
+    await withSynologyClient(env, async (client) => {
+      await client.probeFolder(remotePath);
+    });
+    collectDoctorCheck(
+      checks,
+      "ok",
+      "synology-probe",
+      `Synology probe succeeded for ${remotePath} via ${config.baseUrl}.`,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    collectDoctorCheck(
+      checks,
+      "error",
+      "synology-probe",
+      `Synology probe failed: ${message}`,
+      "Verify SYNOLOGY_BASE_URL, credentials, remote path, and NAS network reachability.",
+    );
+  }
 }
 
 function inspectEmbedding(checks: DoctorCheck[], env: NodeJS.ProcessEnv, probe: boolean): Promise<void> | void {
@@ -1214,6 +1564,7 @@ export async function buildDoctorReport(
   inspectDirectory(checks, "templates-path", "WIKI_TEMPLATES_PATH", templatesPath, {
     recommendation: "Run `wiki setup` or restore template files under WIKI_TEMPLATES_PATH.",
   });
+  await inspectVaultSource(checks, env, options.probe === true);
   inspectDbPath(checks, dbPath);
   inspectConfigAndTemplates(checks, configPath, wikiRoot);
   await inspectEmbedding(checks, env, options.probe === true);

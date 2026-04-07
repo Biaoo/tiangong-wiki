@@ -15,7 +15,19 @@ export interface Workspace {
   env: NodeJS.ProcessEnv;
 }
 
-const SANITIZED_ENV_PREFIXES = ["WIKI_", "VAULT_", "EMBEDDING_", "OPENROUTER_"];
+export interface SynologyTestFile {
+  size?: number;
+  mtime: number;
+  content: string;
+}
+
+export interface SynologyTestState {
+  username?: string;
+  password?: string;
+  files: Record<string, SynologyTestFile>;
+}
+
+const SANITIZED_ENV_PREFIXES = ["WIKI_", "VAULT_", "EMBEDDING_", "OPENROUTER_", "SYNOLOGY_"];
 
 function sanitizeInheritedCliEnv(sourceEnv: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const env = { ...sourceEnv };
@@ -319,6 +331,289 @@ export async function startEmbeddingServer(
 
   return {
     url: `http://127.0.0.1:${port}`,
+    close: () =>
+      new Promise((resolve) => {
+        if (child.killed) {
+          resolve();
+          return;
+        }
+        child.once("exit", () => resolve());
+        child.kill("SIGTERM");
+      }),
+  };
+}
+
+export function writeSynologyState(statePath: string, state: SynologyTestState): void {
+  writeFileSync(
+    statePath,
+    `${JSON.stringify(
+      {
+        username: state.username ?? "tester",
+        password: state.password ?? "secret",
+        files: state.files,
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
+}
+
+export async function startSynologyServer(
+  workspaceRoot: string,
+  initialState: SynologyTestState,
+): Promise<{
+  baseUrl: string;
+  statePath: string;
+  writeState: (state: SynologyTestState) => void;
+  close: () => Promise<void>;
+}> {
+  const statePath = path.join(workspaceRoot, "synology-test-state.json");
+  writeSynologyState(statePath, initialState);
+
+  const script = `
+    const http = require("node:http");
+    const fs = require("node:fs");
+    const path = require("node:path");
+
+    const statePath = process.env.TEST_SYNOLOGY_STATE;
+    const sessions = new Set();
+
+    const sendJson = (response, payload) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify(payload));
+    };
+
+    const normalizePath = (rawValue) => {
+      const value = String(rawValue || "").trim();
+      if (!value || !value.startsWith("/")) {
+        return null;
+      }
+      return "/" + value.split("/").filter(Boolean).join("/");
+    };
+
+    const decodePath = (rawValue) => {
+      if (!rawValue) {
+        return null;
+      }
+      try {
+        const parsed = JSON.parse(String(rawValue));
+        if (Array.isArray(parsed)) {
+          return normalizePath(parsed[0]);
+        }
+      } catch {}
+      return normalizePath(rawValue);
+    };
+
+    const readState = () => JSON.parse(fs.readFileSync(statePath, "utf8"));
+
+    const folderExists = (folderPath, files) => {
+      if (folderPath === "/") {
+        return true;
+      }
+      return Object.keys(files).some((candidate) => {
+        const normalized = normalizePath(candidate);
+        return normalized === folderPath || normalized.startsWith(folderPath + "/");
+      });
+    };
+
+    const listEntries = (folderPath, files) => {
+      const directories = new Map();
+      const entries = [];
+
+      for (const [rawPath, rawInfo] of Object.entries(files)) {
+        const filePath = normalizePath(rawPath);
+        if (!filePath) {
+          continue;
+        }
+        if (folderPath !== "/" && !filePath.startsWith(folderPath + "/")) {
+          continue;
+        }
+        if (folderPath === "/" && !filePath.startsWith("/")) {
+          continue;
+        }
+
+        const remainder = folderPath === "/" ? filePath.slice(1) : filePath.slice(folderPath.length + 1);
+        if (!remainder) {
+          continue;
+        }
+
+        const parts = remainder.split("/").filter(Boolean);
+        if (parts.length === 0) {
+          continue;
+        }
+
+        const childPath = folderPath === "/" ? "/" + parts[0] : folderPath + "/" + parts[0];
+        if (parts.length > 1) {
+          if (!directories.has(childPath)) {
+            directories.set(childPath, {
+              name: parts[0],
+              path: childPath,
+              isdir: true,
+              type: "dir",
+              additional: { type: "dir" },
+            });
+          }
+          continue;
+        }
+
+        const size = Number(rawInfo.size ?? String(rawInfo.content || "").length);
+        const mtime = Number(rawInfo.mtime ?? 0);
+        entries.push({
+          name: parts[0],
+          path: childPath,
+          isdir: false,
+          type: "file",
+          size,
+          additional: {
+            size,
+            type: "file",
+            time: { mtime },
+          },
+        });
+      }
+
+      return [...directories.values(), ...entries].sort((left, right) => String(left.path).localeCompare(String(right.path)));
+    };
+
+    const server = http.createServer((request, response) => {
+      const requestUrl = new URL(request.url, "http://127.0.0.1");
+      const pathname = requestUrl.pathname;
+
+      if (pathname === "/webapi/query.cgi") {
+        sendJson(response, {
+          success: true,
+          data: {
+            "SYNO.API.Auth": { path: "auth.cgi", maxVersion: 7 },
+            "SYNO.FileStation.List": { path: "entry.cgi", maxVersion: 2 },
+            "SYNO.FileStation.Download": { path: "entry.cgi", maxVersion: 2 },
+          },
+        });
+        return;
+      }
+
+      if (pathname === "/webapi/auth.cgi") {
+        const state = readState();
+        const method = requestUrl.searchParams.get("method");
+        if (method === "login") {
+          const account = requestUrl.searchParams.get("account");
+          const password = requestUrl.searchParams.get("passwd");
+          if (account !== state.username || password !== state.password) {
+            sendJson(response, { success: false, error: { code: 105 } });
+            return;
+          }
+          const sid = "sid-" + Date.now() + "-" + Math.random().toString(16).slice(2);
+          sessions.add(sid);
+          sendJson(response, { success: true, data: { sid } });
+          return;
+        }
+        if (method === "logout") {
+          const sid = requestUrl.searchParams.get("_sid");
+          if (sid) {
+            sessions.delete(sid);
+          }
+          sendJson(response, { success: true, data: {} });
+          return;
+        }
+      }
+
+      if (pathname === "/webapi/entry.cgi") {
+        const sid = requestUrl.searchParams.get("_sid");
+        if (!sid || !sessions.has(sid)) {
+          sendJson(response, { success: false, error: { code: 119 } });
+          return;
+        }
+
+        const state = readState();
+        const method = requestUrl.searchParams.get("method");
+
+        if (method === "list") {
+          const folderPath = decodePath(requestUrl.searchParams.get("folder_path"));
+          if (!folderPath) {
+            sendJson(response, { success: false, error: { code: 400 } });
+            return;
+          }
+          if (!folderExists(folderPath, state.files || {})) {
+            sendJson(response, { success: false, error: { code: 408 } });
+            return;
+          }
+          const offset = Number.parseInt(requestUrl.searchParams.get("offset") || "0", 10) || 0;
+          const limit = Number.parseInt(requestUrl.searchParams.get("limit") || "500", 10) || 500;
+          const entries = listEntries(folderPath, state.files || {});
+          sendJson(response, {
+            success: true,
+            data: {
+              files: entries.slice(offset, offset + limit),
+              offset,
+              total: entries.length,
+            },
+          });
+          return;
+        }
+
+        if (method === "download") {
+          const remotePath = decodePath(requestUrl.searchParams.get("path"));
+          if (!remotePath) {
+            sendJson(response, { success: false, error: { code: 400 } });
+            return;
+          }
+          const file = (state.files || {})[remotePath];
+          if (!file) {
+            sendJson(response, { success: false, error: { code: 408 } });
+            return;
+          }
+          response.writeHead(200, {
+            "content-type": "application/octet-stream",
+            "content-disposition": 'attachment; filename="' + path.basename(remotePath) + '"',
+          });
+          response.end(Buffer.from(String(file.content || ""), "utf8"));
+          return;
+        }
+      }
+
+      response.writeHead(404);
+      response.end("not found");
+    });
+
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      process.stdout.write(String(address.port));
+    });
+
+    process.on("SIGTERM", () => server.close(() => process.exit(0)));
+  `;
+
+  const child = spawn(nodeExecPath(), ["-e", script], {
+    env: {
+      ...process.env,
+      TEST_SYNOLOGY_STATE: statePath,
+    },
+    stdio: ["ignore", "pipe", "inherit"],
+  });
+
+  const port = await new Promise<number>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("Timed out starting Synology test server")), 5_000);
+    child.stdout.setEncoding("utf8");
+    child.stdout.once("data", (chunk) => {
+      clearTimeout(timeout);
+      resolve(Number.parseInt(String(chunk), 10));
+    });
+    child.once("error", (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+    child.once("exit", (code) => {
+      if (code && code !== 0) {
+        clearTimeout(timeout);
+        reject(new Error(`Synology test server exited with code ${code}`));
+      }
+    });
+  });
+
+  return {
+    baseUrl: `http://127.0.0.1:${port}`,
+    statePath,
+    writeState: (state) => writeSynologyState(statePath, state),
     close: () =>
       new Promise((resolve) => {
         if (child.killed) {

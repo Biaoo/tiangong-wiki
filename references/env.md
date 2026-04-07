@@ -82,16 +82,16 @@ Validation:
 | `VAULT_SOURCE` | `local` | `local` or `synology` |
 | `VAULT_HASH_MODE` | `content` | `content` hashes full file bytes; `mtime` hashes `path + size + mtime` |
 | `VAULT_SYNOLOGY_REMOTE_PATH` | none | Remote Synology vault path such as `/homes/user/vault` |
+| `SYNOLOGY_BASE_URL` | none | Synology DSM base URL such as `https://nas.example.com:5001` |
+| `SYNOLOGY_USERNAME` | none | Synology DSM username |
+| `SYNOLOGY_PASSWORD` | none | Synology DSM password |
+| `SYNOLOGY_VERIFY_SSL` | `true` | Whether to verify DSM TLS certificates |
+| `SYNOLOGY_READONLY` | `false` | Read-only policy flag stored for future mutation safety; `wiki setup` defaults it to `true` |
 
 Behavior:
 - `VAULT_SOURCE=local`: scan the local vault path directly
 - `VAULT_SOURCE=synology`: poll Synology File Station for file metadata and use `VAULT_PATH` as the local cache directory for downloaded files
 - `VAULT_HASH_MODE=mtime`: preferred for large mounted vaults or slow NAS storage
 - `VAULT_HASH_MODE=content`: preferred when exact byte-level change detection matters more than scan cost
-
-When `VAULT_SOURCE=synology`, the sibling `synology-file-station` skill also needs its own env vars:
-
-- `SYNOLOGY_BASE_URL`
-- `SYNOLOGY_USERNAME`
-- `SYNOLOGY_PASSWORD`
-- optional TLS and policy vars documented in that skill
+- `wiki setup` can now write the full Synology block step by step
+- `wiki doctor --probe` validates Synology credentials and performs a lightweight NAS connectivity probe
