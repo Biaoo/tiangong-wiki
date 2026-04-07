@@ -93,10 +93,20 @@ concept · misconception · bridge · source-summary · lesson · method · pers
 Vault      vault list|diff|queue
 校验        lint [--level error|warn|info]
 导出        export-graph · export-index
-守护进程    daemon start|stop|status
+守护进程    daemon run|start|stop|status
 ```
 
 所有查询命令输出 JSON 到 stdout，适合管道和脚本集成。
+
+## Daemon 运行模型
+
+- `wiki daemon run`：前台启动本地 HTTP daemon，适合 `launchd`、`systemd`、`pm2` 之类的进程管理器托管
+- `wiki daemon start`：本机便利入口，本质是 detached spawn `wiki daemon run`
+- daemon 只监听 `127.0.0.1`
+- `WIKI_DAEMON_PORT` 可选；未设置时使用动态端口
+- daemon 启动后会把实际 `host/port/pid/launchMode` 写入 `wiki/.wiki-daemon.state.json`
+- daemon 健康时，`sync/find/fts/search/graph/page-info/list/stat/vault/*/create/lint/type*/template*/export-*` 优先走 HTTP
+- daemon degraded 时，读命令回退到本地执行；写命令拒绝绕过 daemon 直写
 
 ## 同步流程
 

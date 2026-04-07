@@ -236,6 +236,7 @@ service 会拒绝：
 ```bash
 wiki setup
 wiki doctor
+wiki daemon run
 wiki daemon start
 wiki daemon stop
 wiki daemon status
@@ -246,9 +247,18 @@ wiki daemon status --format json
 
 - `setup`：首次安装时生成 `.wiki.env`、scaffold 工作区，并安装 workspace-local `wiki-skill` / 可选 parser skills
 - `doctor`：在启动服务前确认路径、配置、workspace-local skills 和 agent 凭证状态
-- `start`：后台启动定时 worker
-- `stop`：向 daemon 发送 `SIGTERM`
-- `status`：查看运行状态、上次运行时间、下次同步时间
+- `run`：前台启动 daemon HTTP server + scheduler，是推荐的正式服务入口
+- `start`：本机便利入口，detached spawn `wiki daemon run`，状态里会记录 `launchMode=start`
+- `stop`：优先调用本地 daemon 的 `/shutdown`；daemon degraded 时回退到 `SIGTERM`
+- `status`：优先调用 `/status`，看运行状态、绑定端口、上次运行时间、下次同步时间
+
+额外约束：
+
+- daemon 只监听 `127.0.0.1`
+- `WIKI_DAEMON_PORT` 可选；未设置时由系统分配动态端口
+- CLI 永远以 `wiki/.wiki-daemon.state.json` 中记录的实际 `host/port` 为准，不重新推导端口
+- daemon 健康时，server-backed 命令优先走 HTTP；daemon degraded 时只允许读命令降级到本地执行，写命令必须报错
+- `WIKI_SYNC_INTERVAL=0` 时 daemon 仍常驻，但不自动调度；可以用 `wiki sync` 或 `POST /sync/trigger` 手动触发
 
 ---
 

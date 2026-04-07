@@ -1,146 +1,140 @@
 import { Command } from "commander";
-import { appendFileSync, readFileSync, rmSync } from "node:fs";
 
 import { getMeta } from "../core/db.js";
-import { openRuntimeDb } from "../core/runtime.js";
 import { resolveRuntimePaths } from "../core/paths.js";
-import { syncWorkspace } from "../core/sync.js";
-import { processVaultQueueBatch } from "../core/vault-processing.js";
+import { openRuntimeDb } from "../core/runtime.js";
+import { inspectDaemonAvailability, requestDaemonJson } from "../daemon/client.js";
+import { runDaemonServer } from "../daemon/server.js";
+import { clearDaemonArtifacts, isDaemonProcessRunning, readDaemonPid, readDaemonState, writeDaemonPid } from "../daemon/state.js";
+import type { DaemonState } from "../types/page.js";
 import { AppError } from "../utils/errors.js";
-import { pathExistsSync, writeTextFileSync } from "../utils/fs.js";
-import { writeJson, ensureTextOrJson, writeText } from "../utils/output.js";
+import { pathExistsSync } from "../utils/fs.js";
+import { ensureTextOrJson, writeJson, writeText } from "../utils/output.js";
 import { spawnDetachedCurrentProcess } from "../utils/process.js";
-import { addSeconds, toOffsetIso } from "../utils/time.js";
 
-interface DaemonState {
-  pid: number;
-  startedAt: string;
-  lastRunAt: string | null;
-  nextRunAt: string | null;
+interface StatusPayload {
+  running: boolean;
+  pid: number | null;
+  host: string | null;
+  port: number | null;
+  lastSyncAt: string | null;
+  nextSyncAt: string | null;
   lastResult: "ok" | "error" | null;
-  lastError?: string;
+  syncIntervalSeconds: number | null;
+  launchMode: "run" | "start" | null;
+  currentTask: string | null;
+  state: DaemonState | null;
 }
 
-function readPid(pidPath: string): number | null {
-  if (!pathExistsSync(pidPath)) {
-    return null;
-  }
+const DAEMON_STARTUP_TIMEOUT_MS = 5_000;
+const DAEMON_STARTUP_POLL_MS = 100;
 
-  const value = Number.parseInt(readFileSync(pidPath, "utf8").trim(), 10);
-  return Number.isFinite(value) ? value : null;
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function isRunning(pid: number | null): boolean {
-  if (!pid) {
-    return false;
-  }
+function resolveDaemonRunLaunchMode(env: NodeJS.ProcessEnv = process.env): "run" | "start" {
+  return env.WIKI_DAEMON_LAUNCH_MODE === "start" ? "start" : "run";
+}
 
+function readLastSyncAt(env: NodeJS.ProcessEnv = process.env): string | null {
   try {
-    process.kill(pid, 0);
-    return true;
+    const { db } = openRuntimeDb(env);
+    try {
+      return getMeta(db, "last_sync_at");
+    } finally {
+      db.close();
+    }
   } catch {
-    return false;
-  }
-}
-
-function readState(statePath: string): DaemonState | null {
-  if (!pathExistsSync(statePath)) {
     return null;
   }
-
-  return JSON.parse(readFileSync(statePath, "utf8")) as DaemonState;
 }
 
-function writeState(statePath: string, state: DaemonState): void {
-  writeTextFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`);
-}
+function buildFallbackStatus(env: NodeJS.ProcessEnv = process.env): StatusPayload {
+  const paths = resolveRuntimePaths(env);
+  const pidFromPidFile = readDaemonPid(paths.daemonPidPath);
+  const state = readDaemonState(paths.daemonStatePath);
+  const pid = state?.pid ?? pidFromPidFile;
+  const running = isDaemonProcessRunning(pid);
 
-function clearDaemonArtifacts(paths: ReturnType<typeof resolveRuntimePaths>): void {
-  rmSync(paths.daemonPidPath, { force: true });
-}
-
-async function runDaemonLoop(): Promise<void> {
-  const paths = resolveRuntimePaths(process.env);
-  const interval = paths.syncIntervalSeconds;
-  const state: DaemonState = {
-    pid: process.pid,
-    startedAt: toOffsetIso(),
-    lastRunAt: null,
-    nextRunAt: interval > 0 ? toOffsetIso(addSeconds(new Date(), interval)) : null,
-    lastResult: null,
+  return {
+    running,
+    pid,
+    host: state?.host ?? null,
+    port: state?.port ?? null,
+    lastSyncAt: readLastSyncAt(env),
+    nextSyncAt: state?.nextRunAt ?? null,
+    lastResult: state?.lastResult ?? null,
+    syncIntervalSeconds: state?.syncIntervalSeconds ?? null,
+    launchMode: state?.launchMode ?? null,
+    currentTask: state?.currentTask ?? null,
+    state,
   };
+}
 
-  writeTextFileSync(paths.daemonPidPath, `${process.pid}\n`);
-  writeState(paths.daemonStatePath, state);
+async function stopViaSignal(pid: number, env: NodeJS.ProcessEnv = process.env): Promise<{ status: string; pid: number | null }> {
+  const paths = resolveRuntimePaths(env);
+  try {
+    process.kill(pid, "SIGTERM");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ESRCH") {
+      clearDaemonArtifacts(paths);
+      return { status: "stopped", pid: null };
+    }
+    throw error;
+  }
 
-  let timer: NodeJS.Timeout | null = null;
-  let stopping = false;
+  for (let index = 0; index < 10; index += 1) {
+    if (!isDaemonProcessRunning(pid)) {
+      clearDaemonArtifacts(paths);
+      return { status: "stopped", pid: null };
+    }
+    await sleep(100);
+  }
 
-  const scheduleNext = () => {
-    if (stopping) {
+  return { status: "stopping", pid };
+}
+
+async function waitForHealthyDaemon(expectedPid: number, env: NodeJS.ProcessEnv = process.env): Promise<void> {
+  const paths = resolveRuntimePaths(env);
+  const deadline = Date.now() + DAEMON_STARTUP_TIMEOUT_MS;
+
+  while (Date.now() < deadline) {
+    const availability = await inspectDaemonAvailability(env);
+    if (availability.status === "healthy" && availability.pid === expectedPid) {
       return;
     }
-    if (interval <= 0) {
-      timer = setInterval(() => undefined, 1 << 30);
-      return;
+
+    if (!isDaemonProcessRunning(expectedPid)) {
+      clearDaemonArtifacts(paths);
+      throw new AppError(`Failed to start daemon. Check ${paths.daemonLogPath} for details.`, "runtime");
     }
-    const nextRun = addSeconds(new Date(), interval);
-    state.nextRunAt = toOffsetIso(nextRun);
-    writeState(paths.daemonStatePath, state);
-    timer = setTimeout(() => {
-      void runCycle();
-    }, interval * 1000);
-  };
 
-  const runCycle = async () => {
-    state.nextRunAt = null;
-    writeState(paths.daemonStatePath, state);
-    try {
-      const syncResult = await syncWorkspace();
-      appendFileSync(
-        paths.daemonLogPath,
-        `[${toOffsetIso()}] sync ok: mode=${syncResult.mode} inserted=${syncResult.inserted} updated=${syncResult.updated} deleted=${syncResult.deleted} vaultChanges=${syncResult.vault.changes}\n`,
-      );
-      const queueResult = await processVaultQueueBatch(process.env, {
-        log: (message) => appendFileSync(paths.daemonLogPath, `[${toOffsetIso()}] queue ${message}\n`),
-      });
-      if (queueResult.enabled) {
-        appendFileSync(
-          paths.daemonLogPath,
-          `[${toOffsetIso()}] queue summary: processed=${queueResult.processed} done=${queueResult.done} skipped=${queueResult.skipped} errored=${queueResult.errored}\n`,
-        );
-      }
-      state.lastRunAt = toOffsetIso();
-      state.lastResult = "ok";
-      delete state.lastError;
-      writeState(paths.daemonStatePath, state);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      appendFileSync(paths.daemonLogPath, `[${toOffsetIso()}] sync failed: ${message}\n`);
-      state.lastRunAt = toOffsetIso();
-      state.lastResult = "error";
-      state.lastError = message;
-      writeState(paths.daemonStatePath, state);
-    } finally {
-      scheduleNext();
-    }
-  };
+    await sleep(DAEMON_STARTUP_POLL_MS);
+  }
 
-  const shutdown = () => {
-    stopping = true;
-    if (timer) {
-      clearTimeout(timer);
-    }
-    state.nextRunAt = null;
-    writeState(paths.daemonStatePath, state);
-    clearDaemonArtifacts(paths);
-    process.exit(0);
-  };
+  await stopViaSignal(expectedPid, env).catch(() => undefined);
+  clearDaemonArtifacts(paths);
+  throw new AppError(
+    `Timed out waiting for daemon to become healthy. Check ${paths.daemonLogPath} for details.`,
+    "runtime",
+  );
+}
 
-  process.on("SIGTERM", shutdown);
-  process.on("SIGINT", shutdown);
-
-  await runCycle();
+function renderStatusText(payload: StatusPayload): string {
+  return [
+    "wiki daemon status",
+    `running: ${payload.running}`,
+    `pid: ${payload.pid ?? ""}`,
+    `host: ${payload.host ?? ""}`,
+    `port: ${payload.port ?? ""}`,
+    `lastSyncAt: ${payload.lastSyncAt ?? ""}`,
+    `nextSyncAt: ${payload.nextSyncAt ?? ""}`,
+    `lastResult: ${payload.lastResult ?? ""}`,
+    `syncIntervalSeconds: ${payload.syncIntervalSeconds ?? ""}`,
+    `launchMode: ${payload.launchMode ?? ""}`,
+    `currentTask: ${payload.currentTask ?? ""}`,
+  ].join("\n");
 }
 
 export function registerDaemonCommand(program: Command): void {
@@ -148,93 +142,92 @@ export function registerDaemonCommand(program: Command): void {
 
   daemon
     .command("start")
-    .description("Start the wiki sync daemon")
-    .action(() => {
+    .description("Start the wiki daemon as a detached local background service")
+    .action(async () => {
       const paths = resolveRuntimePaths(process.env);
-      const existingPid = readPid(paths.daemonPidPath);
-      if (isRunning(existingPid)) {
-        throw new AppError(`Daemon is already running with PID ${existingPid}`, "runtime");
+      const availability = await inspectDaemonAvailability(process.env);
+      if (availability.status === "healthy" || availability.status === "degraded") {
+        throw new AppError(`Daemon is already running with PID ${availability.pid}`, "runtime", availability);
+      }
+
+      if (pathExistsSync(paths.daemonPidPath) || pathExistsSync(paths.daemonStatePath)) {
+        clearDaemonArtifacts(paths);
       }
 
       const pid = spawnDetachedCurrentProcess(["daemon", "run"], {
-        env: process.env,
+        env: {
+          ...process.env,
+          WIKI_DAEMON_LAUNCH_MODE: "start",
+        },
         logFile: paths.daemonLogPath,
       });
       if (!pid) {
         throw new AppError("Failed to start daemon", "runtime");
       }
 
-      writeTextFileSync(paths.daemonPidPath, `${pid}\n`);
+      writeDaemonPid(paths.daemonPidPath, pid);
+      await waitForHealthyDaemon(pid, process.env);
       writeJson({ status: "started", pid });
     });
 
   daemon
     .command("stop")
-    .description("Stop the wiki sync daemon")
-    .action(() => {
+    .description("Stop the wiki daemon")
+    .action(async () => {
+      const availability = await inspectDaemonAvailability(process.env);
+      if (availability.status === "healthy" && availability.endpoint) {
+        writeJson(
+          await requestDaemonJson<{ status: string; pid: number | null }>({
+            endpoint: availability.endpoint,
+            method: "POST",
+            path: "/shutdown",
+          }),
+        );
+        return;
+      }
+
       const paths = resolveRuntimePaths(process.env);
-      const pid = readPid(paths.daemonPidPath);
-      if (!isRunning(pid)) {
+      const pid = availability.pid ?? readDaemonPid(paths.daemonPidPath);
+      if (!isDaemonProcessRunning(pid)) {
         clearDaemonArtifacts(paths);
         writeJson({ status: "stopped", pid: null });
         return;
       }
 
-      process.kill(pid!, "SIGTERM");
-      clearDaemonArtifacts(paths);
-      writeJson({ status: "stopping", pid });
+      writeJson(await stopViaSignal(pid!, process.env));
     });
 
   daemon
     .command("status")
     .description("Show daemon state and scheduling information")
     .option("--format <format>", "text or json", "text")
-    .action((options) => {
+    .action(async (options) => {
       const format = ensureTextOrJson(options.format);
-      const paths = resolveRuntimePaths(process.env);
-      const pid = readPid(paths.daemonPidPath);
-      const running = isRunning(pid);
-      const state = readState(paths.daemonStatePath);
-      let lastSyncAt: string | null = null;
-      try {
-        const { db } = openRuntimeDb(process.env);
-        try {
-          lastSyncAt = getMeta(db, "last_sync_at");
-        } finally {
-          db.close();
-        }
-      } catch {
-        lastSyncAt = null;
-      }
-
-      const payload = {
-        running,
-        pid,
-        lastSyncAt,
-        nextSyncAt: state?.nextRunAt ?? null,
-        state,
-      };
+      const availability = await inspectDaemonAvailability(process.env);
+      const payload =
+        availability.status === "healthy" && availability.endpoint
+          ? await requestDaemonJson<StatusPayload>({
+              endpoint: availability.endpoint,
+              method: "GET",
+              path: "/status",
+            })
+          : buildFallbackStatus(process.env);
 
       if (format === "json") {
         writeJson(payload);
         return;
       }
 
-      writeText(
-        [
-          "wiki daemon status",
-          `running: ${running}`,
-          `pid: ${pid ?? ""}`,
-          `lastSyncAt: ${lastSyncAt ?? ""}`,
-          `nextSyncAt: ${state?.nextRunAt ?? ""}`,
-        ].join("\n"),
-      );
+      writeText(renderStatusText(payload));
     });
 
   daemon
-    .command("run", { hidden: true })
-    .description("Internal daemon worker entrypoint")
+    .command("run")
+    .description("Run the wiki daemon in the foreground")
     .action(async () => {
-      await runDaemonLoop();
+      await runDaemonServer({
+        env: process.env,
+        launchMode: resolveDaemonRunLaunchMode(process.env),
+      });
     });
 }

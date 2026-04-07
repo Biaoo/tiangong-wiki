@@ -62,6 +62,19 @@ function parsePositiveInteger(raw: string | undefined, defaultValue: number, lab
   return value;
 }
 
+function parseOptionalPort(raw: string | undefined, label: string): number | null {
+  if (!raw || !raw.trim()) {
+    return null;
+  }
+
+  const value = Number.parseInt(raw, 10);
+  if (!Number.isFinite(value) || value < 1 || value > 65_535) {
+    throw new AppError(`${label} must be an integer between 1 and 65535, got ${raw}`, "config");
+  }
+
+  return value;
+}
+
 function normalizeOptionalUrl(rawValue: string | undefined): string | null {
   const value = rawValue?.trim();
   if (!value) {
@@ -176,6 +189,8 @@ export function resolveRuntimePaths(env: NodeJS.ProcessEnv = process.env): Runti
     queueArtifactsPath: path.join(wikiRoot, ".queue-artifacts"),
     packageRoot: getPackageRoot(),
     syncIntervalSeconds: parseSyncInterval(env.WIKI_SYNC_INTERVAL),
+    daemonHost: "127.0.0.1",
+    daemonPort: parseOptionalPort(env.WIKI_DAEMON_PORT, "WIKI_DAEMON_PORT"),
     daemonPidPath: path.join(wikiRoot, ".wiki-daemon.pid"),
     daemonLogPath: path.join(wikiRoot, ".wiki-daemon.log"),
     daemonStatePath: path.join(wikiRoot, ".wiki-daemon.state.json"),

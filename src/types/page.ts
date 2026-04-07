@@ -276,7 +276,33 @@ export interface RuntimePaths {
   queueArtifactsPath: string;
   packageRoot: string;
   syncIntervalSeconds: number;
+  daemonHost: string;
+  daemonPort: number | null;
   daemonPidPath: string;
   daemonLogPath: string;
   daemonStatePath: string;
+}
+
+export type DaemonLaunchMode = "run" | "start";
+export type DaemonTask =
+  | "idle"
+  | "sync"
+  | "sync-trigger"
+  | "cycle"
+  | "create"
+  | "template-create"
+  | "shutdown";
+
+export interface DaemonState {
+  pid: number;
+  host: string;
+  port: number;
+  launchMode: DaemonLaunchMode;
+  startedAt: string;
+  lastRunAt: string | null;
+  nextRunAt: string | null;
+  lastResult: "ok" | "error" | null;
+  lastError: string | null;
+  syncIntervalSeconds: number;
+  currentTask: DaemonTask;
 }
