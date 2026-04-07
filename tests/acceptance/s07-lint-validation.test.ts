@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { rmSync } from "node:fs";
+import path from "node:path";
 
 import {
   bootstrapRuntimeAssets,
@@ -41,7 +42,7 @@ tags: []
 createdAt: 2026-04-06
 updatedAt: 2026-04-06
 sourceType: pdf
-vaultPath: reports/q1-summary.pdf
+vaultPath: ${JSON.stringify(path.join(workspace.vaultPath, "reports/q1-summary.pdf"))}
 keyFindings:
   - Reference should break later
 ---
@@ -110,11 +111,13 @@ Concept C is intentionally orphaned.
     expect(lint.errors).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ check: "vault_ref_exists", page: "source-summaries/a.md" }),
+        expect.objectContaining({ check: "vault_path_absolute", page: "source-summaries/a.md" }),
         expect.objectContaining({ check: "page_ref_exists", page: "concepts/b.md" }),
       ]),
     );
     expect(lint.warnings).toEqual(
       expect.arrayContaining([
+        expect.objectContaining({ check: "related_pages_empty", page: "source-summaries/a.md" }),
         expect.objectContaining({ check: "orphan_page", page: "concepts/c.md" }),
       ]),
     );

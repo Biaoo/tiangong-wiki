@@ -19,6 +19,19 @@ function normalizeStringArray(value: unknown): string[] {
   return [];
 }
 
+function normalizeOptionalString(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized ? normalized : null;
+}
+
+function isAbsoluteLikePath(value: string): boolean {
+  return path.isAbsolute(value) || /^[A-Za-z]:[\\/]/.test(value);
+}
+
 function olderThanSixMonths(value: string | null): boolean {
   if (!value) {
     return false;
@@ -111,6 +124,8 @@ export function registerLintCommand(program: Command): void {
 
           const { parsed: page } = parsed;
           const sourceRefs = normalizeStringArray(page.rawData.sourceRefs);
+          const relatedPages = normalizeStringArray(page.rawData.relatedPages);
+          const vaultPath = normalizeOptionalString(page.rawData.vaultPath);
 
           for (const reference of sourceRefs) {
             if (reference.startsWith("vault/") && !vaultIds.has(reference.replace(/^vault\//, ""))) {
@@ -141,6 +156,24 @@ export function registerLintCommand(program: Command): void {
 
           if (sourceRefs.length === 0) {
             addItem(result.warnings, page.page.id, "source_refs_empty", "sourceRefs is empty");
+          }
+
+          if (vaultPath && isAbsoluteLikePath(vaultPath)) {
+            addItem(
+              result.errors,
+              page.page.id,
+              "vault_path_absolute",
+              `vaultPath is an absolute path: "${vaultPath}", should be relative to vault root`,
+            );
+          }
+
+          if (page.page.pageType === "source-summary" && relatedPages.length === 0) {
+            addItem(
+              result.warnings,
+              page.page.id,
+              "related_pages_empty",
+              "relatedPages is empty for source-summary — page has no explicit knowledge connections",
+            );
           }
 
           if (page.page.status === "active" && olderThanSixMonths(page.page.updatedAt)) {
