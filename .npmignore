@@ -1,0 +1,10 @@
+src/
+tests/
+.env
+.env.*
+tsconfig.json
+vitest.config.ts
+.git/
+.DS_Store
+*.log
+*.tgz

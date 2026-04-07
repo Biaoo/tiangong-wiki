@@ -7,7 +7,7 @@
 wiki <command> [options]
 
 # npx
-npx @tiangong/wiki-skill <command> [options]
+npx @tiangong-lca/wiki <command> [options]
 
 # 开发模式
 npm run dev -- <command> [options]

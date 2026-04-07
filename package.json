@@ -1,8 +1,20 @@
 {
-  "name": "@tiangong/wiki-skill",
+  "name": "@tiangong-lca/wiki",
   "version": "0.1.0",
   "description": "Local-first wiki index and query engine for Markdown knowledge pages.",
   "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Biaoo/wiki.git"
+  },
+  "homepage": "https://github.com/Biaoo/wiki#readme",
+  "bugs": {
+    "url": "https://github.com/Biaoo/wiki/issues"
+  },
+  "license": "MIT",
   "bin": {
     "wiki": "./dist/index.js"
   },

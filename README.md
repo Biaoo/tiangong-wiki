@@ -1,0 +1,202 @@
+# Wiki Skill
+
+`@tiangong-lca/wiki` — 本地优先的 Markdown 知识库索引与查询引擎。
+
+将 Markdown 文件作为唯一真实来源（SSOT），通过 SQLite 构建结构化索引、全文搜索、语义向量检索和知识图谱，供 AI Agent 或人工直接使用。
+
+## 技术架构
+
+### 三层模型
+
+```text
+┌─────────────────────────────────────────────────────────┐
+│  Agent Native（原生能力）                                │
+│  深度阅读、正则搜索、直接编辑 Markdown                    │
+├─────────────────────────────────────────────────────────┤
+│  Agent Instruction（AI 决策）                            │
+│  "这个文件该不该入库？" "用什么 pageType？"                │
+├─────────────────────────────────────────────────────────┤
+│  Wiki Skill（确定性逻辑）                                │
+│  文件扫描 → YAML 解析 → SQLite UPSERT → 多维查询         │
+└─────────────────────────────────────────────────────────┘
+```
+
+### 双引擎设计
+
+| 引擎 | 存储 | 用途 |
+|------|------|------|
+| Markdown 文件 | `wiki/pages/` | SSOT，人和 AI 可直接读写 |
+| SQLite 索引 | `index.db` | 结构化查询、FTS5 全文搜索、sqlite-vec 向量检索、图谱遍历 |
+
+### 双目录管理
+
+| 目录 | 索引深度 | 说明 |
+|------|----------|------|
+| `wiki/pages/` | 完整索引（frontmatter 解析、edges 提取、FTS、embedding） | 知识库页面 |
+| `vault/` | 轻量索引（文件元数据：路径、大小、时间） | 外部素材待处理区 |
+
+## 技术栈
+
+| 组件 | 技术 | 版本 |
+|------|------|------|
+| 语言 | TypeScript (ESM) | ^6.0 |
+| 运行时 | Node.js | >=18 |
+| CLI 框架 | Commander.js | ^14.0 |
+| 数据库 | better-sqlite3 | ^12.8 |
+| 向量检索 | sqlite-vec | ^0.1.9 |
+| Frontmatter 解析 | gray-matter | ^4.0 |
+| 工作流引擎 | @openai/codex-sdk | ^0.118 |
+| 测试框架 | Vitest | ^4.1 |
+
+## 数据模型
+
+### SQLite Schema（7 张表）
+
+```text
+pages             ─── 知识页面（固定列 + 动态列）
+pages_fts         ─── FTS5 全文搜索（title, tags, summary_text）
+vec_pages         ─── 向量表（sqlite-vec, metadata-only embedding）
+edges             ─── 知识图谱边（source → target, edge_type）
+vault_files       ─── Vault 文件索引
+vault_changelog   ─── Vault 变更日志
+vault_processing_queue ─── Vault 处理队列（Codex 工作流状态）
+sync_meta         ─── 同步元数据（KV 存储）
+```
+
+### 三级索引列模型
+
+1. **固定列** — 硬编码在 schema 中（id, title, pageType, status, tags...）
+2. **部署列** — `wiki.config.json` 的 `customColumns`，全局生效
+3. **模板列** — 各 `templates[type].columns`，按 pageType 生效
+
+配置变更时自动 `ALTER TABLE` 添加新列，无需手动迁移。
+
+### 11 种内置 pageType
+
+concept · misconception · bridge · source-summary · lesson · method · person · achievement · resume · research-note · faq
+
+每种类型有独立模板（`assets/templates/`），定义特有的 frontmatter 字段和 edge 规则。
+
+## CLI 命令
+
+```text
+索引管理    init · sync · check-config
+结构化查询  find [--type] [--status] [--tag]
+全文搜索    fts <query>
+语义搜索    search <query>               （需配置 embedding）
+知识图谱    graph <nodeId> [--depth N]
+自省        list · page-info · stat
+创建页面    create --type <type> --title <title>
+模板管理    template list|show|create
+类型发现    type list|show|recommend
+Vault      vault list|diff|queue
+校验        lint [--level error|warn|info]
+导出        export-graph · export-index
+守护进程    daemon start|stop|status
+```
+
+所有查询命令输出 JSON 到 stdout，适合管道和脚本集成。
+
+## 同步流程
+
+```text
+sync
+ ├─ 0. 检查 schema 版本（变更 → 全量重建）
+ ├─ 1. 扫描文件（SHA-256 content_hash 变更检测）
+ ├─ 2. 解析 frontmatter + 提取 edges
+ ├─ 3. UPSERT 事务（insert / update / delete）
+ ├─ 4. Embedding（metadata-only，增量处理）
+ ├─ 5. Vault 扫描 + 队列管理
+ └─ 6. 更新 sync_meta
+```
+
+支持 `--path` 单文件同步，自动检测配置/embedding profile 变更并升级为全量同步。
+
+## Vault → Wiki 工作流
+
+```text
+vault 新文件 → vault_processing_queue (pending)
+                     │
+              Codex SDK 工作流
+              ├─ 运行时发现（wiki type list / wiki find / wiki fts）
+              ├─ 阅读文件内容
+              └─ 产出 decision + actions[]
+                     │
+              ┌──────┼──────┐
+              skip   apply   propose_only
+                     │
+              创建/更新 wiki pages
+              模板演化守卫（默认 proposal_only）
+```
+
+## 快速开始
+
+```bash
+# 安装依赖 & 编译
+npm install && npm run build
+
+# 设置环境变量
+export WIKI_PATH=/path/to/workspace/wiki/pages
+
+# 初始化工作区
+wiki init
+
+# 同步索引
+wiki sync
+
+# 查询
+wiki find --type concept --status active
+wiki fts "贝叶斯"
+wiki search "优化算法的收敛条件"    # 需配置 EMBEDDING_*
+wiki graph bayes-theorem --depth 2
+```
+
+## 环境变量
+
+| 变量 | 必需 | 说明 |
+|------|------|------|
+| `WIKI_PATH` | 是 | 知识库页面目录（精确到 `pages/`） |
+| `VAULT_PATH` | 否 | 外部素材目录（默认 `../vault`） |
+| `WIKI_DB_PATH` | 否 | SQLite 数据库路径（默认 `../index.db`） |
+| `WIKI_CONFIG_PATH` | 否 | 配置文件路径（默认 `../wiki.config.json`） |
+| `EMBEDDING_BASE_URL` | 否 | Embedding API endpoint |
+| `EMBEDDING_API_KEY` | 否 | Embedding API key |
+| `EMBEDDING_MODEL` | 否 | Embedding 模型名 |
+| `EMBEDDING_DIMENSIONS` | 否 | 向量维度（默认 384） |
+
+完整环境变量参考见 [docs/operations/env.md](../docs/operations/env.md)
+
+## 测试
+
+```bash
+npm run test          # 编译 + 运行全部测试
+npm run test:watch    # watch 模式
+```
+
+测试覆盖 4 个层级：unit (2) · integration (18) · acceptance (10) · e2e (2)
+
+## 项目结构
+
+```text
+src/
+├── commands/          # 18 个 CLI 命令实现
+├── core/              # 核心业务逻辑
+│   ├── db.ts          # SQLite schema 初始化、动态列管理
+│   ├── sync.ts        # 6 步同步编排
+│   ├── indexer.ts     # 文件扫描、变更检测、UPSERT
+│   ├── frontmatter.ts # YAML 解析、edge 提取、summary 生成
+│   ├── embedding.ts   # OpenAI 兼容 embedding 客户端
+│   ├── vault-processing.ts  # Vault 队列处理
+│   ├── codex-workflow.ts    # Codex SDK runner
+│   └── ...
+├── types/             # TypeScript 接口定义
+├── utils/             # 工具函数
+└── index.ts           # CLI 入口
+```
+
+## 相关文档
+
+- 安装指南：[README.zh-CN.md](./README.zh-CN.md)
+- Skill 接口定义：[SKILL.md](./SKILL.md)
+- 设计文档：[docs/design/](../docs/design/)
+- 运维手册：[docs/operations/](../docs/operations/)
