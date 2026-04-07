@@ -240,8 +240,8 @@ wiki daemon status --format json
 
 含义：
 
-- `setup`：首次安装时生成 `.wiki.env` 并 scaffold 工作区
-- `doctor`：在启动服务前确认路径、配置和 agent 凭证状态
+- `setup`：首次安装时生成 `.wiki.env`、scaffold 工作区，并安装 workspace-local `wiki-skill` / 可选 parser skills
+- `doctor`：在启动服务前确认路径、配置、workspace-local skills 和 agent 凭证状态
 - `start`：后台启动定时 worker
 - `stop`：向 daemon 发送 `SIGTERM`
 - `status`：查看运行状态、上次运行时间、下次同步时间

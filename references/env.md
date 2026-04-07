@@ -9,6 +9,7 @@ The CLI loads configuration in this order:
 3. nearest auto-discovered `.wiki.env` in the current working directory or its parents
 
 `wiki setup` writes a `.wiki.env` file that follows this contract. Real process env vars still win over file values.
+The same setup flow also installs workspace-local skills under `workspace/.agents/skills/`.
 
 | Variable | Description | Example |
 | --- | --- | --- |
@@ -24,6 +25,15 @@ The CLI loads configuration in this order:
 | `WIKI_CONFIG_PATH` | `WIKI_PATH/../wiki.config.json` | Runtime config file path |
 | `WIKI_TEMPLATES_PATH` | `WIKI_PATH/../templates` | Runtime template directory |
 | `WIKI_SYNC_INTERVAL` | `86400` | Daemon sync interval in seconds |
+
+## Workspace Skills
+
+`wiki setup` always installs `wiki-skill` into `workspace/.agents/skills/wiki-skill`.
+If you opt into parser skills during setup, they are installed into the same workspace-local skills directory and recorded in `.wiki.env`.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `WIKI_PARSER_SKILLS` | empty | Comma-separated optional parser skills selected during `wiki setup`, such as `pdf,docx`; `wiki doctor` uses this to verify expected workspace-local parser skills |
 
 ## Embedding
 

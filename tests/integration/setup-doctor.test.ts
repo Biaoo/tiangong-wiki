@@ -1,4 +1,5 @@
-import { realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -20,6 +21,34 @@ function stripWikiEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return next;
 }
 
+function createFakeSkillsInstaller(workspaceRoot: string, mode: "success" | "failure" = "success"): string {
+  const binDir = path.join(workspaceRoot, "fake-bin");
+  mkdirSync(binDir, { recursive: true });
+  const installerPath = path.join(binDir, "npx");
+  writeFileSync(
+    installerPath,
+    mode === "success"
+      ? [
+          "#!/bin/sh",
+          "skill_name=\"\"",
+          "while [ \"$#\" -gt 0 ]; do",
+          "  if [ \"$1\" = \"--skill\" ]; then",
+          "    shift",
+          "    skill_name=\"$1\"",
+          "  fi",
+          "  shift",
+          "done",
+          "mkdir -p \"$PWD/.agents/skills/$skill_name\"",
+          "printf '%s\\n' '---' \"name: $skill_name\" 'description: fake skill' '---' > \"$PWD/.agents/skills/$skill_name/SKILL.md\"",
+          "",
+        ].join("\n")
+      : ['#!/bin/sh', 'echo "fake installer failure" >&2', "exit 7", ""].join("\n"),
+    "utf8",
+  );
+  chmodSync(installerPath, 0o755);
+  return binDir;
+}
+
 describe("setup and doctor integration", () => {
   const workspaces: ReturnType<typeof createWorkspace>[] = [];
 
@@ -33,7 +62,10 @@ describe("setup and doctor integration", () => {
     const workspace = createWorkspace();
     workspaces.push(workspace);
 
-    const env = stripWikiEnv(workspace.env);
+    const env = {
+      ...stripWikiEnv(workspace.env),
+      PATH: [createFakeSkillsInstaller(workspace.root), process.env.PATH].filter(Boolean).join(path.delimiter),
+    };
     const answers = [
       "",
       "",
@@ -42,6 +74,10 @@ describe("setup and doctor integration", () => {
       "",
       "",
       "",
+      "n",
+      "n",
+      "y",
+      "n",
       "n",
       "n",
       "y",
@@ -60,20 +96,30 @@ describe("setup and doctor integration", () => {
     expect(envFile).toContain("WIKI_PATH=");
     expect(envFile).toContain("VAULT_PATH=");
     expect(envFile).toContain("WIKI_AGENT_ENABLED=false");
+    expect(envFile).toContain("WIKI_PARSER_SKILLS=pdf");
+    expect(readFile(path.join(workspace.root, ".agents", "skills", "wiki-skill", "SKILL.md"))).toContain(
+      "name: wiki-skill",
+    );
+    expect(readFile(path.join(workspace.root, ".agents", "skills", "pdf", "SKILL.md"))).toContain("name: pdf");
 
     const doctor = runCli(["doctor", "--format", "json"], env, { cwd: workspace.root });
     expect(doctor.status).toBe(0);
     const report = readJson<{
       ok: boolean;
       envFile: { loadedPath: string | null };
+      skills: { requestedParserSkills: string[]; missingSkills: string[] };
       checks: Array<{ id: string; severity: string }>;
     }>(doctor.stdout);
     expect(report.ok).toBe(true);
     expect(report.envFile.loadedPath).toBe(realpathSync(envFilePath));
+    expect(report.skills.requestedParserSkills).toEqual(["pdf"]);
+    expect(report.skills.missingSkills).toEqual([]);
     expect(report.checks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: "env-file", severity: "ok" }),
         expect.objectContaining({ id: "config", severity: "ok" }),
+        expect.objectContaining({ id: "wiki-skill", severity: "ok" }),
+        expect.objectContaining({ id: "parser-skills", severity: "ok" }),
       ]),
     );
 
@@ -94,6 +140,7 @@ describe("setup and doctor integration", () => {
       `WIKI_DB_PATH=${workspace.wikiRoot}/index.db`,
       `WIKI_CONFIG_PATH=${workspace.wikiRoot}/wiki.config.json`,
       `WIKI_TEMPLATES_PATH=${workspace.wikiRoot}/templates`,
+      "WIKI_PARSER_SKILLS=pdf,docx",
       "WIKI_SYNC_INTERVAL=86400",
       "",
     ].join("\n");
@@ -108,15 +155,95 @@ describe("setup and doctor integration", () => {
     const report = readJson<{
       ok: boolean;
       recommendations: string[];
+      skills: { requestedParserSkills: string[]; missingSkills: string[] };
       checks: Array<{ id: string; severity: string; summary: string }>;
     }>(doctor.stdout);
     expect(report.ok).toBe(false);
+    expect(report.skills.requestedParserSkills).toEqual(["pdf", "docx"]);
+    expect(report.skills.missingSkills).toEqual(expect.arrayContaining(["wiki-skill", "pdf", "docx"]));
     expect(report.checks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: "config", severity: "error" }),
         expect.objectContaining({ id: "templates-path", severity: "error" }),
+        expect.objectContaining({ id: "skills-root", severity: "error" }),
+        expect.objectContaining({ id: "wiki-skill", severity: "error" }),
+        expect.objectContaining({ id: "parser-skills", severity: "error" }),
       ]),
     );
     expect(report.recommendations.join("\n")).toContain("wiki setup");
+  });
+
+  it("reports invalid parser skill declarations precisely", () => {
+    const workspace = createWorkspace();
+    workspaces.push(workspace);
+
+    const env = stripWikiEnv(workspace.env);
+    const envFilePath = `${workspace.root}/.wiki.env`;
+    const envFile = [
+      `WIKI_PATH=${workspace.wikiPath}`,
+      `VAULT_PATH=${workspace.vaultPath}`,
+      `WIKI_DB_PATH=${workspace.wikiRoot}/index.db`,
+      `WIKI_CONFIG_PATH=${workspace.wikiRoot}/wiki.config.json`,
+      `WIKI_TEMPLATES_PATH=${workspace.wikiRoot}/templates`,
+      "WIKI_PARSER_SKILLS=pdf,unknown",
+      "WIKI_SYNC_INTERVAL=86400",
+      "",
+    ].join("\n");
+    writeFileSync(envFilePath, envFile, "utf8");
+
+    const doctor = runCli(["doctor", "--format", "json"], env, {
+      cwd: workspace.root,
+      allowFailure: true,
+    });
+    expect(doctor.status).toBe(2);
+
+    const report = readJson<{
+      ok: boolean;
+      skills: { requestedParserSkills: string[]; invalidParserSkills: string[] };
+      checks: Array<{ id: string; severity: string; summary: string }>;
+    }>(doctor.stdout);
+    expect(report.ok).toBe(false);
+    expect(report.skills.requestedParserSkills).toEqual(["pdf"]);
+    expect(report.skills.invalidParserSkills).toEqual(["unknown"]);
+    expect(report.checks).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: "parser-skills", severity: "error" })]),
+    );
+  });
+
+  it("fails setup when a selected parser skill cannot be installed", () => {
+    const workspace = createWorkspace();
+    workspaces.push(workspace);
+
+    const env = {
+      ...stripWikiEnv(workspace.env),
+      PATH: [createFakeSkillsInstaller(workspace.root, "failure"), process.env.PATH].filter(Boolean).join(path.delimiter),
+    };
+    const answers = [
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "n",
+      "n",
+      "y",
+      "n",
+      "n",
+      "n",
+      "y",
+      "",
+    ].join("\n");
+
+    const setup = runCli(["setup"], env, {
+      cwd: workspace.root,
+      input: answers,
+      allowFailure: true,
+    });
+    expect(setup.status).toBe(1);
+    expect(setup.stderr).toContain("failed to install parser skill pdf");
+    expect(setup.stderr).toContain("fake installer failure");
+    expect(existsSync(path.join(workspace.root, ".wiki.env"))).toBe(false);
   });
 });

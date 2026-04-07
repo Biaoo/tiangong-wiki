@@ -1,11 +1,25 @@
 import { accessSync, constants, readFileSync } from "node:fs";
 import path from "node:path";
 import { createInterface } from "node:readline/promises";
+import { fileURLToPath } from "node:url";
 
 import { DEFAULT_WIKI_ENV_FILE, getCliEnvironmentInfo, parseEnvFile, serializeEnvEntries } from "./cli-env.js";
 import { resolveTemplateFilePath, loadConfig } from "./config.js";
 import { EmbeddingClient } from "./embedding.js";
 import { resolveAgentSettings } from "./paths.js";
+import {
+  ensureWikiSkillInstall,
+  formatParserSkills,
+  inspectSkillInstall,
+  installParserSkill,
+  OPTIONAL_PARSER_SKILLS,
+  parseParserSkillSelection,
+  parseParserSkills,
+  resolveWorkspaceRootFromWikiPath,
+  resolveWorkspaceSkillPath,
+  resolveWorkspaceSkillPaths,
+  type ParserSkillName,
+} from "./workspace-skills.js";
 import { scaffoldWorkspaceAssets } from "./workspace-bootstrap.js";
 import { AppError } from "../utils/errors.js";
 import { pathExistsSync, writeTextFileSync } from "../utils/fs.js";
@@ -34,10 +48,17 @@ export interface DoctorReport {
   };
   effectivePaths: {
     wikiPath: string | null;
+    workspaceRoot: string | null;
     vaultPath: string | null;
     dbPath: string | null;
     configPath: string | null;
     templatesPath: string | null;
+    skillsRoot: string | null;
+  };
+  skills: {
+    requestedParserSkills: ParserSkillName[];
+    invalidParserSkills: string[];
+    missingSkills: string[];
   };
   checks: DoctorCheck[];
   recommendations: string[];
@@ -61,6 +82,7 @@ interface SetupValues {
   agentApiKey: string | null;
   agentModel: string | null;
   agentBatchSize: string | null;
+  parserSkills: ParserSkillName[];
 }
 
 export interface SetupResult {
@@ -70,6 +92,8 @@ export interface SetupResult {
   copiedTemplates: number;
   embeddingEnabled: boolean;
   agentEnabled: boolean;
+  parserSkills: ParserSkillName[];
+  skillsRoot: string;
 }
 
 interface PromptContext {
@@ -98,10 +122,15 @@ const MANAGED_ENV_KEYS = new Set([
   "WIKI_AGENT_API_KEY",
   "WIKI_AGENT_MODEL",
   "WIKI_AGENT_BATCH_SIZE",
+  "WIKI_PARSER_SKILLS",
 ]);
 
 function writeSection(output: NodeJS.WritableStream, title: string): void {
   output.write(`\n${title}\n`);
+}
+
+function resolvePackageRoot(packageRoot?: string): string {
+  return packageRoot ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 }
 
 function resolveInputPath(value: string, cwd: string): string {
@@ -294,6 +323,7 @@ function getPathDefaults(env: NodeJS.ProcessEnv, cwd: string): SetupValues {
     agentApiKey: env.WIKI_AGENT_API_KEY ?? null,
     agentModel: env.WIKI_AGENT_MODEL ?? null,
     agentBatchSize: env.WIKI_AGENT_BATCH_SIZE ?? "5",
+    parserSkills: parseParserSkills(env.WIKI_PARSER_SKILLS, { strict: false }),
   };
 }
 
@@ -433,10 +463,39 @@ async function collectAgentSettings(
   };
 }
 
+async function collectParserSkillSettings(
+  driver: PromptDriver,
+  ctx: PromptContext,
+  defaults: SetupValues,
+  wikiPath: string,
+): Promise<ParserSkillName[]> {
+  const { skillsRoot } = resolveWorkspaceSkillPaths(wikiPath);
+  ctx.output.write(`wiki-skill is required and will be installed at ${path.join(skillsRoot, "wiki-skill")}.\n`);
+
+  const selected = new Set<ParserSkillName>(defaults.parserSkills);
+  for (const skill of OPTIONAL_PARSER_SKILLS) {
+    const enabled = await promptYesNo(
+      driver,
+      ctx,
+      `Install parser skill ${skill.name} (${skill.summary})?`,
+      selected.has(skill.name),
+    );
+    if (enabled) {
+      selected.add(skill.name);
+    } else {
+      selected.delete(skill.name);
+    }
+  }
+
+  return OPTIONAL_PARSER_SKILLS.map((skill) => skill.name).filter((skill) => selected.has(skill));
+}
+
 function buildSetupSummary(values: SetupValues): string {
+  const { workspaceRoot, skillsRoot } = resolveWorkspaceSkillPaths(values.wikiPath);
   const lines = [
     "Configuration summary",
     `  WIKI_ENV_FILE: ${values.envFilePath}`,
+    `  WORKSPACE_ROOT: ${workspaceRoot}`,
     `  WIKI_PATH: ${values.wikiPath}`,
     `  VAULT_PATH: ${values.vaultPath}`,
     `  WIKI_DB_PATH: ${values.dbPath}`,
@@ -445,6 +504,9 @@ function buildSetupSummary(values: SetupValues): string {
     `  WIKI_SYNC_INTERVAL: ${values.syncInterval}`,
     `  Embeddings: ${values.embeddingEnabled ? "enabled" : "disabled"}`,
     `  Vault processing: ${values.agentEnabled ? "enabled" : "disabled"}`,
+    `  Skills root: ${skillsRoot}`,
+    `  Required skill: wiki-skill`,
+    `  Parser skills: ${values.parserSkills.length > 0 ? values.parserSkills.join(", ") : "(none)"}`,
   ];
 
   if (values.embeddingEnabled) {
@@ -483,6 +545,7 @@ function writeSetupEnvFile(values: SetupValues): void {
     ["WIKI_AGENT_API_KEY", values.agentEnabled ? values.agentApiKey : null],
     ["WIKI_AGENT_MODEL", values.agentEnabled ? values.agentModel : null],
     ["WIKI_AGENT_BATCH_SIZE", values.agentEnabled ? values.agentBatchSize : null],
+    ["WIKI_PARSER_SKILLS", formatParserSkills(values.parserSkills)],
   ];
 
   const body = [
@@ -511,12 +574,12 @@ export async function runSetupWizard(
   const ctx: PromptContext = { cwd, output };
 
   try {
-    writeSection(output, "Step 1/6: Configuration file");
+    writeSection(output, "Step 1/7: Configuration file");
     const envFilePath = await promptText(driver, ctx, "Path for the generated .wiki.env file", defaults.envFilePath, {
       normalize: (value) => resolveInputPath(value, cwd),
     });
 
-    writeSection(output, "Step 2/6: Core paths");
+    writeSection(output, "Step 2/7: Core paths");
     const wikiPath = await promptText(driver, ctx, "WIKI_PATH", defaults.wikiPath, {
       normalize: (value) => resolveInputPath(value, cwd),
       validator: (value) => validateWikiPath(resolveInputPath(value, cwd)),
@@ -534,16 +597,19 @@ export async function runSetupWizard(
       normalize: (value) => resolveInputPath(value, cwd),
     });
 
-    writeSection(output, "Step 3/6: Sync schedule");
+    writeSection(output, "Step 3/7: Sync schedule");
     const syncInterval = await promptText(driver, ctx, "WIKI_SYNC_INTERVAL (seconds)", defaults.syncInterval, {
       validator: (value) => validateNonNegativeInteger(value, "WIKI_SYNC_INTERVAL"),
     });
 
-    writeSection(output, "Step 4/6: Embedding configuration");
+    writeSection(output, "Step 4/7: Embedding configuration");
     const embedding = await collectEmbeddingSettings(driver, ctx, defaults, env);
 
-    writeSection(output, "Step 5/6: Automatic vault processing");
+    writeSection(output, "Step 5/7: Automatic vault processing");
     const agent = await collectAgentSettings(driver, ctx, defaults);
+
+    writeSection(output, "Step 6/7: Codex skills");
+    const parserSkills = await collectParserSkillSettings(driver, ctx, defaults, wikiPath);
 
     const values: SetupValues = {
       envFilePath,
@@ -555,32 +621,48 @@ export async function runSetupWizard(
       syncInterval,
       ...embedding,
       ...agent,
+      parserSkills,
     };
 
-    writeSection(output, "Step 6/6: Confirm");
+    writeSection(output, "Step 7/7: Confirm");
     output.write(`${buildSetupSummary(values)}\n`);
     const confirmed = await promptYesNo(driver, ctx, "Write configuration and scaffold workspace assets?", true);
     if (!confirmed) {
       throw new AppError("Setup aborted before writing any files.", "runtime");
     }
 
+    const packageRoot = resolvePackageRoot(options.packageRoot);
     const bootstrap = scaffoldWorkspaceAssets({
-      packageRoot: options.packageRoot ?? path.resolve(path.dirname(new URL(import.meta.url).pathname), "../.."),
+      packageRoot,
       wikiRoot: path.resolve(wikiPath, ".."),
       wikiPath,
       vaultPath,
       templatesPath,
       configPath,
     });
+    const { workspaceRoot, skillsRoot } = resolveWorkspaceSkillPaths(values.wikiPath);
+    const wikiSkillInstall = ensureWikiSkillInstall(values.wikiPath, packageRoot);
+    const parserSkillInstalls = values.parserSkills.map((skillName) =>
+      installParserSkill(skillName, workspaceRoot, {
+        env,
+        output,
+      }),
+    );
     writeSetupEnvFile(values);
 
     output.write(
       [
         "\nwiki setup complete",
         `configuration file: ${values.envFilePath}`,
+        `skills root: ${skillsRoot}`,
+        `wiki-skill: ${wikiSkillInstall.status}`,
+        `parser skills: ${values.parserSkills.length > 0 ? values.parserSkills.join(", ") : "(none)"}`,
         `created directories: ${bootstrap.createdDirectories.length}`,
         `copied config: ${bootstrap.copiedConfig}`,
         `copied templates: ${bootstrap.copiedTemplates}`,
+        ...(parserSkillInstalls.length > 0
+          ? [`installed parser skills: ${parserSkillInstalls.map((item) => `${item.name} (${item.status})`).join(", ")}`]
+          : []),
         "",
         "Next steps:",
         "- Run `wiki doctor` to validate the generated configuration.",
@@ -598,6 +680,8 @@ export async function runSetupWizard(
       copiedTemplates: bootstrap.copiedTemplates,
       embeddingEnabled: values.embeddingEnabled,
       agentEnabled: values.agentEnabled,
+      parserSkills: values.parserSkills,
+      skillsRoot,
     };
   } finally {
     driver.close();
@@ -817,6 +901,127 @@ function inspectAgent(checks: DoctorCheck[], env: NodeJS.ProcessEnv): void {
   }
 }
 
+function inspectWorkspaceSkills(
+  checks: DoctorCheck[],
+  wikiPath: string | null,
+  rawParserSkills: string | undefined,
+): {
+  workspaceRoot: string | null;
+  skillsRoot: string | null;
+  requestedParserSkills: ParserSkillName[];
+  invalidParserSkills: string[];
+  missingSkills: string[];
+} {
+  if (!wikiPath) {
+    collectDoctorCheck(
+      checks,
+      "error",
+      "skills-root",
+      "Workspace skill root cannot be derived until WIKI_PATH is configured.",
+      "Run `wiki setup` to configure WIKI_PATH and install workspace-local skills.",
+    );
+    collectDoctorCheck(
+      checks,
+      "error",
+      "wiki-skill",
+      "wiki-skill cannot be checked until WIKI_PATH is configured.",
+      "Run `wiki setup` to configure WIKI_PATH and install workspace-local skills.",
+    );
+    return {
+      workspaceRoot: null,
+      skillsRoot: null,
+      requestedParserSkills: [],
+      invalidParserSkills: [],
+      missingSkills: ["wiki-skill"],
+    };
+  }
+
+  const { workspaceRoot, skillsRoot, wikiSkillPath } = resolveWorkspaceSkillPaths(wikiPath);
+  inspectDirectory(checks, "skills-root", "WORKSPACE_SKILLS_ROOT", skillsRoot, {
+    recommendation: "Run `wiki setup` to create workspace-local skills under .agents/skills.",
+  });
+
+  const missingSkills: string[] = [];
+  const wikiSkill = inspectSkillInstall(wikiSkillPath, "wiki-skill");
+  if (wikiSkill.readable) {
+    collectDoctorCheck(checks, "ok", "wiki-skill", `wiki-skill is installed: ${wikiSkill.skillMdPath}`);
+  } else {
+    collectDoctorCheck(
+      checks,
+      "error",
+      "wiki-skill",
+      `wiki-skill is missing or unreadable: ${wikiSkill.skillMdPath}`,
+      "Run `wiki setup` to install workspace-local wiki-skill.",
+    );
+    missingSkills.push("wiki-skill");
+  }
+
+  const { skills: requestedParserSkills, invalid: invalidParserSkills } = parseParserSkillSelection(rawParserSkills);
+  if (invalidParserSkills.length > 0) {
+    collectDoctorCheck(
+      checks,
+      "error",
+      "parser-skills",
+      `Parser skill configuration is invalid: ${invalidParserSkills.join(", ")}`,
+      "Fix WIKI_PARSER_SKILLS in `.wiki.env` or rerun `wiki setup`.",
+    );
+    return {
+      workspaceRoot,
+      skillsRoot,
+      requestedParserSkills,
+      invalidParserSkills,
+      missingSkills,
+    };
+  }
+
+  if (requestedParserSkills.length === 0) {
+    collectDoctorCheck(
+      checks,
+      "ok",
+      "parser-skills",
+      "No optional parser skills are declared in WIKI_PARSER_SKILLS.",
+    );
+    return {
+      workspaceRoot,
+      skillsRoot,
+      requestedParserSkills,
+      invalidParserSkills,
+      missingSkills,
+    };
+  }
+
+  const missingParserSkills = requestedParserSkills.filter((skillName) => {
+    const result = inspectSkillInstall(resolveWorkspaceSkillPath(workspaceRoot, skillName), skillName);
+    return !result.readable;
+  });
+
+  if (missingParserSkills.length > 0) {
+    collectDoctorCheck(
+      checks,
+      "error",
+      "parser-skills",
+      `Declared parser skills are missing or unreadable: ${missingParserSkills.join(", ")}`,
+      "Rerun `wiki setup` or reinstall the missing parser skills into workspace-local .agents/skills.",
+    );
+    missingSkills.push(...missingParserSkills);
+  } else {
+    collectDoctorCheck(
+      checks,
+      "ok",
+      "parser-skills",
+      `Declared parser skills are installed: ${requestedParserSkills.join(", ")}`,
+    );
+  }
+
+  return {
+    workspaceRoot,
+    skillsRoot,
+    requestedParserSkills,
+    invalidParserSkills,
+    missingSkills,
+  };
+}
+
 function inspectConfigAndTemplates(checks: DoctorCheck[], configPath: string | null, wikiRoot: string | null): void {
   if (!configPath) {
     collectDoctorCheck(
@@ -993,10 +1198,12 @@ export async function buildDoctorReport(
 
   const wikiPath = env.WIKI_PATH ? path.resolve(env.WIKI_PATH) : null;
   const wikiRoot = wikiPath ? path.resolve(wikiPath, "..") : null;
+  const workspaceRoot = wikiPath ? resolveWorkspaceRootFromWikiPath(wikiPath) : null;
   const vaultPath = wikiRoot ? path.resolve(env.VAULT_PATH ?? path.join(wikiRoot, "..", "vault")) : null;
   const dbPath = wikiRoot ? path.resolve(env.WIKI_DB_PATH ?? path.join(wikiRoot, "index.db")) : null;
   const configPath = wikiRoot ? path.resolve(env.WIKI_CONFIG_PATH ?? path.join(wikiRoot, "wiki.config.json")) : null;
   const templatesPath = wikiRoot ? path.resolve(env.WIKI_TEMPLATES_PATH ?? path.join(wikiRoot, "templates")) : null;
+  const skillStatus = inspectWorkspaceSkills(checks, wikiPath, env.WIKI_PARSER_SKILLS);
 
   inspectDirectory(checks, "wiki-path", "WIKI_PATH", wikiPath, {
     recommendation: "Run `wiki setup` to generate WIKI_PATH and scaffold wiki/pages.",
@@ -1025,10 +1232,17 @@ export async function buildDoctorReport(
     },
     effectivePaths: {
       wikiPath,
+      workspaceRoot,
       vaultPath,
       dbPath,
       configPath,
       templatesPath,
+      skillsRoot: skillStatus.skillsRoot,
+    },
+    skills: {
+      requestedParserSkills: skillStatus.requestedParserSkills,
+      invalidParserSkills: skillStatus.invalidParserSkills,
+      missingSkills: skillStatus.missingSkills,
     },
     checks,
     recommendations: uniqueRecommendations(checks),

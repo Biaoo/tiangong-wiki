@@ -353,7 +353,9 @@ export WIKI_SYNC_INTERVAL=86400
 wiki setup
 ```
 
-它会写一个 `.wiki.env`，后续从该工作区运行 `wiki` 命令时会自动加载。
+它会写一个 `.wiki.env`，并把 `wiki-skill` 安装到当前 workspace 的 `.agents/skills/` 目录。
+如果你在向导里选择了 `pdf/docx/pptx/xlsx` 等 parser skills，setup 也会一并安装并记录到 `WIKI_PARSER_SKILLS`。
+后续从该工作区运行 `wiki` 命令时会自动加载这些配置。
 
 最稳妥的做法是二选一：
 

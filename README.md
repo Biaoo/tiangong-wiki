@@ -159,10 +159,10 @@ node dist/index.js --version
 ## 快速开始
 
 ```bash
-# 运行完整配置向导（写入 .wiki.env）
+# 运行完整配置向导（写入 .wiki.env，并安装 workspace-local skills）
 wiki setup
 
-# 自检
+# 自检（含 workspace-local skills）
 wiki doctor
 
 # 初始化工作区
@@ -184,6 +184,8 @@ wiki graph bayes-theorem --depth 2
 
 - 首次安装时运行 `wiki setup`
 - `wiki setup` 会写入当前工作目录下的 `.wiki.env`
+- `wiki setup` 会把 `wiki-skill` 安装到 `workspace/.agents/skills/wiki-skill`
+- 如果你选了 parser skills，setup 也会把它们安装到 `workspace/.agents/skills/`
 - CLI 启动时会自动发现最近的 `.wiki.env`
 - 也可以显式设置 `WIKI_ENV_FILE=/absolute/path/to/.wiki.env`
 
@@ -194,6 +196,7 @@ wiki graph bayes-theorem --depth 2
 | `VAULT_PATH` | 否 | 外部素材目录（默认 `../vault`） |
 | `WIKI_DB_PATH` | 否 | SQLite 数据库路径（默认 `../index.db`） |
 | `WIKI_CONFIG_PATH` | 否 | 配置文件路径（默认 `../wiki.config.json`） |
+| `WIKI_PARSER_SKILLS` | 否 | 由 `wiki setup` 写入的逗号分隔 parser skill 列表，供 `wiki doctor` 校验 |
 | `EMBEDDING_BASE_URL` | 否 | Embedding API endpoint |
 | `EMBEDDING_API_KEY` | 否 | Embedding API key |
 | `EMBEDDING_MODEL` | 否 | Embedding 模型名 |
