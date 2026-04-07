@@ -5,6 +5,18 @@
     "title",
     "tags"
   ],
+  "vaultFileTypes": [
+    "md",
+    "txt",
+    "pdf",
+    "docx",
+    "pptx",
+    "xlsx",
+    "csv",
+    "json",
+    "yaml",
+    "yml"
+  ],
   "commonEdges": {
     "relatedPages": {
       "edgeType": "related",

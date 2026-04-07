@@ -306,6 +306,8 @@ WHERE e.target = 'bayesian-theorem';
 
   "defaultSummaryFields": ["title", "tags"],
 
+  "vaultFileTypes": ["md", "txt", "pdf", "docx", "pptx", "xlsx", "csv", "json", "yaml", "yml"],
+
   "commonEdges": {
     "relatedPages": { "edgeType": "related", "resolve": "path" },
     "sourceRefs": { "edgeType": "sourced_from", "resolve": "path", "match": "\\.md$" }
@@ -439,6 +441,7 @@ WHERE e.target = 'bayesian-theorem';
 | `schemaVersion` | 配置格式版本，用于未来迁移 |
 | `customColumns` | **部署级**自定义列，所有模板共享。key 是 frontmatter 字段名（camelCase），value 是 SQLite 类型。会在 `pages` 表上建列+索引 |
 | `defaultSummaryFields` | 所有模板共享的 summary_text 基础字段 |
+| `vaultFileTypes` | vault 扫描白名单。仅这些扩展名会进入 `vault_files` 和 `vault_processing_queue`；值为不带点的小写扩展名数组 |
 | `commonEdges` | 所有模板共享的 edge 提取规则。每条规则含 `edgeType`、`resolve`、可选 `match`（正则前置过滤） |
 | `templates.<type>.file` | 模板 .md 文件路径（相对于 wiki/） |
 | `templates.<type>.columns` | **模板级**自定义列。仅该类型的页面会填充这些列 |

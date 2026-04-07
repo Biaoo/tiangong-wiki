@@ -217,7 +217,12 @@ export async function syncWorkspace(options: SyncOptions = {}): Promise<SyncResu
     };
     if (mode === "full") {
       syncId = makeSyncId();
-      const currentVaultFiles = collectVaultFiles(runtimePaths.vaultPath, runtimePaths.packageRoot, env);
+      const currentVaultFiles = collectVaultFiles(
+        runtimePaths.vaultPath,
+        runtimePaths.packageRoot,
+        config.vaultFileTypes,
+        env,
+      );
       const vaultResult = syncVaultIndex(db, currentVaultFiles, syncId);
       vaultFiles = vaultResult.files;
       vaultChanges = vaultResult.changes.length;

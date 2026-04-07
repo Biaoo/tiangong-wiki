@@ -59,12 +59,27 @@ function computeVaultHash(
   return sha256FileSync(filePath);
 }
 
-function localVaultFiles(vaultPath: string, hashMode: VaultHashMode): VaultFile[] {
+function normalizeVaultFileExtension(filePath: string): string | null {
+  const fileExt = path.extname(filePath).replace(/^\./, "").toLowerCase();
+  return fileExt || null;
+}
+
+function createAllowedVaultFileTypeSet(vaultFileTypes: readonly string[]): Set<string> {
+  return new Set(vaultFileTypes.map((item) => item.trim().replace(/^\./, "").toLowerCase()).filter(Boolean));
+}
+
+function isAllowedVaultFile(filePath: string, allowedFileTypes: Set<string>): boolean {
+  const fileExt = normalizeVaultFileExtension(filePath);
+  return fileExt !== null && allowedFileTypes.has(fileExt);
+}
+
+function localVaultFiles(vaultPath: string, hashMode: VaultHashMode, vaultFileTypes: readonly string[]): VaultFile[] {
   const indexedAt = toOffsetIso();
-  return listFilesRecursiveSync(vaultPath).map((filePath) => {
+  const allowedFileTypes = createAllowedVaultFileTypeSet(vaultFileTypes);
+  return listFilesRecursiveSync(vaultPath).filter((filePath) => isAllowedVaultFile(filePath, allowedFileTypes)).map((filePath) => {
     const stats = fileStatSync(filePath);
     const id = normalizeVaultId(vaultPath, filePath);
-    const fileExt = path.extname(filePath).replace(/^\./, "") || null;
+    const fileExt = normalizeVaultFileExtension(filePath);
 
     return {
       id,
@@ -237,6 +252,7 @@ function scanSynologyFolder(
   currentFolder: string,
   results: VaultFile[],
   hashMode: VaultHashMode,
+  allowedFileTypes: Set<string>,
 ): void {
   const indexedAt = toOffsetIso();
   const items = listSynologyFolderAll(scriptPath, currentFolder);
@@ -249,14 +265,18 @@ function scanSynologyFolder(
     const isDirectory =
       item.isdir === true || item.type === "dir" || item.additional?.type === "dir";
     if (isDirectory) {
-      scanSynologyFolder(scriptPath, remoteRoot, filePath, results, hashMode);
+      scanSynologyFolder(scriptPath, remoteRoot, filePath, results, hashMode, allowedFileTypes);
+      continue;
+    }
+
+    if (!isAllowedVaultFile(filePath, allowedFileTypes)) {
       continue;
     }
 
     const relativeId = filePath
       .replace(new RegExp(`^${remoteRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/?`), "")
       .replace(/^\/+/, "");
-    const fileExt = path.extname(filePath).replace(/^\./, "") || null;
+    const fileExt = normalizeVaultFileExtension(filePath);
     const fileSize = Number(item.additional?.size ?? item.size ?? 0);
     const fileMtime = Number(item.additional?.time?.mtime ?? item.time?.mtime ?? 0);
 
@@ -283,11 +303,13 @@ function synologyVaultFiles(
   packageRoot: string,
   env: NodeJS.ProcessEnv,
   hashMode: VaultHashMode,
+  vaultFileTypes: readonly string[],
 ): VaultFile[] {
   const scriptPath = getSynologyScriptPath(packageRoot, env);
   const results: VaultFile[] = [];
   const normalizedRoot = remoteRoot.replace(/\/+$/g, "");
-  scanSynologyFolder(scriptPath, normalizedRoot, normalizedRoot, results, hashMode);
+  const allowedFileTypes = createAllowedVaultFileTypeSet(vaultFileTypes);
+  scanSynologyFolder(scriptPath, normalizedRoot, normalizedRoot, results, hashMode, allowedFileTypes);
   const sorted = results.sort((left, right) => left.id.localeCompare(right.id));
   if (hashMode !== "content") {
     return sorted;
@@ -351,6 +373,7 @@ export function getVaultQueuePriority(fileExt: string | null): number {
 export function collectVaultFiles(
   vaultPath: string,
   packageRoot: string,
+  vaultFileTypes: readonly string[],
   env: NodeJS.ProcessEnv = process.env,
 ): VaultFile[] {
   const source = (env.VAULT_SOURCE ?? "local").trim().toLowerCase();
@@ -363,10 +386,10 @@ export function collectVaultFiles(
       throw new AppError("VAULT_SYNOLOGY_REMOTE_PATH is required when VAULT_SOURCE=synology", "config");
     }
 
-    return synologyVaultFiles(remotePath, vaultPath, packageRoot, env, hashMode);
+    return synologyVaultFiles(remotePath, vaultPath, packageRoot, env, hashMode, vaultFileTypes);
   }
 
-  return localVaultFiles(vaultPath, hashMode);
+  return localVaultFiles(vaultPath, hashMode, vaultFileTypes);
 }
 
 export function ensureLocalVaultFile(

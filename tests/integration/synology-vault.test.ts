@@ -57,7 +57,8 @@ elif folder == "/vault/projects":
     ]}}
 elif folder == "/vault/imports":
     payload = {"data": {"files": [
-        {"name": "notes.txt", "path": "/vault/imports/notes.txt", "isdir": False, "size": 9, "additional": {"size": 9, "time": {"mtime": 1700000001}}}
+        {"name": "notes.txt", "path": "/vault/imports/notes.txt", "isdir": False, "size": 9, "additional": {"size": 9, "time": {"mtime": 1700000001}}},
+        {"name": "Thumbs.db", "path": "/vault/imports/Thumbs.db", "isdir": False, "size": 3, "additional": {"size": 3, "time": {"mtime": 1700000002}}}
     ]}}
 else:
     payload = {"data": {"files": []}}
@@ -78,6 +79,7 @@ print(json.dumps(payload))
     expect(vaultList.map((item) => item.id)).toEqual(
       expect.arrayContaining(["projects/brief.pdf", "imports/notes.txt"]),
     );
+    expect(vaultList.map((item) => item.id)).not.toContain("imports/Thumbs.db");
   });
 
   it("paginates through large Synology directories", () => {

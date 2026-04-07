@@ -106,13 +106,14 @@ describe("acceptance: queue infrastructure", () => {
       totalPending: number;
       items: Array<{ fileId: string; status: string }>;
     }>(["vault", "queue"], workspace.env);
-    expect(initialQueue.totalPending).toBe(6);
+    expect(initialQueue.totalPending).toBe(5);
     expect(initialQueue.items).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ fileId: "imports/paper.pdf", status: "pending" }),
-        expect.objectContaining({ fileId: "imports/diagram.png", status: "pending" }),
+        expect.objectContaining({ fileId: "imports/notes.md", status: "pending" }),
       ]),
     );
+    expect(initialQueue.items.map((item) => item.fileId)).not.toContain("imports/diagram.png");
 
     const runner = new FakeCodexWorkflowRunner(async ({ queueItemId, threadId }) => {
       if (queueItemId.endsWith(".png")) {
@@ -165,7 +166,7 @@ describe("acceptance: queue infrastructure", () => {
 
     const processed = await processVaultQueueBatch(workspace.env, { workflowRunner: runner });
     expect(processed.done).toBe(5);
-    expect(processed.skipped).toBe(1);
+    expect(processed.skipped).toBe(0);
     expect(processed.errored).toBe(0);
 
     const queue = runCliJson<{
@@ -176,11 +177,11 @@ describe("acceptance: queue infrastructure", () => {
     }>(["vault", "queue"], workspace.env);
     expect(queue.totalPending).toBe(0);
     expect(queue.totalDone).toBe(5);
-    expect(queue.totalSkipped).toBe(1);
+    expect(queue.totalSkipped).toBe(0);
     expect(queue.items).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ fileId: "imports/paper.pdf", status: "done", decision: "apply" }),
-        expect.objectContaining({ fileId: "imports/diagram.png", status: "skipped", decision: "skip" }),
+        expect.objectContaining({ fileId: "imports/notes.md", status: "done", decision: "apply" }),
       ]),
     );
     expect(queue.items.filter((item) => item.status === "done").every((item) => Boolean(item.threadId))).toBe(true);

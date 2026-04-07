@@ -1,9 +1,9 @@
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { loadConfig } from "../../src/core/config.js";
+import { DEFAULT_VAULT_FILE_TYPES, loadConfig } from "../../src/core/config.js";
 import { parsePage } from "../../src/core/frontmatter.js";
-import { bootstrapRuntimeAssets, cleanupWorkspace, createWorkspace, writePage } from "../helpers.js";
+import { bootstrapRuntimeAssets, cleanupWorkspace, createWorkspace, updateWikiConfig, writePage } from "../helpers.js";
 
 describe("config and frontmatter", () => {
   const workspaces: ReturnType<typeof createWorkspace>[] = [];
@@ -20,6 +20,7 @@ describe("config and frontmatter", () => {
     bootstrapRuntimeAssets(workspace);
 
     const config = loadConfig(path.join(workspace.wikiRoot, "wiki.config.json"));
+    expect(config.vaultFileTypes).toEqual([...DEFAULT_VAULT_FILE_TYPES]);
     const filePath = writePage(
       workspace,
       "concepts/bayes-theorem.md",
@@ -93,5 +94,17 @@ title: Bad Page
       return;
     }
     expect(result.error.code).toBe("unknown_page_type");
+  });
+
+  it("normalizes custom vault file types in wiki.config.json", () => {
+    const workspace = createWorkspace();
+    workspaces.push(workspace);
+    bootstrapRuntimeAssets(workspace);
+    updateWikiConfig(workspace, (config) => {
+      config.vaultFileTypes = [".PDF", " txt ", "pdf", "YAML"];
+    });
+
+    const config = loadConfig(path.join(workspace.wikiRoot, "wiki.config.json"));
+    expect(config.vaultFileTypes).toEqual(["pdf", "txt", "yaml"]);
   });
 });

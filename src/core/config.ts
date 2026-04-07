@@ -12,6 +12,7 @@ import type {
 } from "../types/config.js";
 
 const ALLOWED_SQLITE_TYPES = new Set<SqliteColumnType>(["text", "integer", "real", "numeric", "blob"]);
+export const DEFAULT_VAULT_FILE_TYPES = ["md", "txt", "pdf", "docx", "pptx", "xlsx", "csv", "json", "yaml", "yml"] as const;
 
 function ensureObject(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -27,6 +28,18 @@ function ensureStringArray(value: unknown, label: string): string[] {
   }
 
   return value;
+}
+
+function ensureVaultFileTypes(value: unknown, label: string): string[] {
+  const normalized = ensureStringArray(value, label).map((item, index) => {
+    const fileType = item.trim().replace(/^\./, "").toLowerCase();
+    if (!fileType) {
+      throw new AppError(`${label}[${index}] must not be empty`, "config");
+    }
+    return fileType;
+  });
+
+  return [...new Set(normalized)];
 }
 
 function ensureColumnMap(value: unknown, label: string): Record<string, SqliteColumnType> {
@@ -103,6 +116,7 @@ export function loadConfig(configPath: string): LoadedWikiConfig {
     schemaVersion: Number(raw.schemaVersion),
     customColumns: ensureColumnMap(raw.customColumns ?? {}, "customColumns"),
     defaultSummaryFields: ensureStringArray(raw.defaultSummaryFields ?? [], "defaultSummaryFields"),
+    vaultFileTypes: ensureVaultFileTypes(raw.vaultFileTypes ?? DEFAULT_VAULT_FILE_TYPES, "vaultFileTypes"),
     commonEdges: ensureEdgeMap(raw.commonEdges ?? {}, "commonEdges"),
     templates: Object.fromEntries(
       Object.entries(ensureObject(raw.templates, "templates")).map(([pageType, template]) => [

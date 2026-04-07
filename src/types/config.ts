@@ -17,6 +17,7 @@ export interface WikiConfig {
   schemaVersion: number;
   customColumns: Record<string, SqliteColumnType>;
   defaultSummaryFields: string[];
+  vaultFileTypes: string[];
   commonEdges: Record<string, EdgeRule>;
   templates: Record<string, TemplateConfig>;
 }
