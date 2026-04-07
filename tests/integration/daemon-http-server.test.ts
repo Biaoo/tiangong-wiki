@@ -16,6 +16,7 @@ import {
   runCli,
   runCliJson,
   waitFor,
+  writePage,
   writeVaultFile,
   type Workspace,
 } from "../helpers.js";
@@ -79,6 +80,19 @@ async function fetchDaemonJson<T>(
     status: response.status,
     payload: readJson<T>(text),
   };
+}
+
+async function readFirstSseChunk(workspace: Workspace, routePath: string): Promise<string> {
+  const state = readDaemonState(workspace);
+  const response = await fetch(`http://${state.host}:${state.port}${routePath}`);
+  if (!response.ok || !response.body) {
+    throw new Error(`Expected SSE response for ${routePath}, got HTTP ${response.status}`);
+  }
+
+  const reader = response.body.getReader();
+  const { value } = await reader.read();
+  await reader.cancel();
+  return new TextDecoder().decode(value ?? new Uint8Array());
 }
 
 async function waitForChildExit(child: ChildProcess): Promise<void> {
@@ -352,6 +366,35 @@ describe("daemon HTTP server integration", () => {
     expect(state.launchMode).toBe("start");
   });
 
+  it("starts the daemon from `wiki dashboard` and serves the dashboard shell", async () => {
+    const workspace = createWorkspace({
+      WIKI_SYNC_INTERVAL: "0",
+    });
+    workspaces.push(workspace);
+    runCli(["init"], workspace.env);
+
+    const payload = runCliJson<{
+      url: string;
+      opened: boolean;
+      pid: number;
+      host: string;
+      port: number;
+    }>(["dashboard", "--no-open", "--format", "json"], workspace.env);
+
+    expect(payload.opened).toBe(false);
+    expect(payload.url).toBe(`http://${payload.host}:${payload.port}/dashboard`);
+    expect(payload.pid).toBeGreaterThan(0);
+
+    await waitFor(() => {
+      const status = runCliJson<DaemonStatusPayload>(["daemon", "status", "--format", "json"], workspace.env);
+      return status.running === true && status.port === payload.port;
+    });
+
+    const response = await fetch(payload.url);
+    expect(response.ok).toBe(true);
+    expect(await response.text()).toContain("Knowledge Constellation");
+  });
+
   it("falls back to local reads when the daemon is degraded and refuses write commands", async () => {
     const workspace = createWorkspace();
     workspaces.push(workspace);
@@ -497,6 +540,206 @@ describe("daemon HTTP server integration", () => {
     expect(queue.totalSkipped).toBe(5);
     expect(queue.items.filter((item) => item.status === "skipped")).toHaveLength(5);
     expect(daemon.logs()).toContain("cycle: queue summary processed=5 done=0 skipped=5 errored=0 batches=3");
+  });
+
+  it("serves dashboard API contracts and log history from the daemon", async () => {
+    const workspace = createWorkspace({
+      WIKI_SYNC_INTERVAL: "0",
+    });
+    workspaces.push(workspace);
+
+    runCli(["init"], workspace.env);
+    writeVaultFile(workspace, "imports/alpha.md", "# Alpha Source\n\nThis is a local vault source.");
+    writePage(
+      workspace,
+      "concepts/graph-thinking.md",
+      `---
+pageType: concept
+title: Graph Thinking
+nodeId: graph-thinking
+status: active
+visibility: private
+sourceRefs: []
+relatedPages:
+  - source-summaries/alpha-source.md
+tags:
+  - graph
+createdAt: 2026-04-08
+updatedAt: 2026-04-08
+confidence: high
+masteryLevel: medium
+prerequisites: []
+---
+
+## Core
+
+Graph thinking connects ideas.
+`,
+    );
+    writePage(
+      workspace,
+      "source-summaries/alpha-source.md",
+      `---
+pageType: source-summary
+title: Alpha Source Summary
+nodeId: alpha-source
+status: active
+visibility: private
+sourceRefs: []
+relatedPages:
+  - concepts/graph-thinking.md
+tags:
+  - alpha
+createdAt: 2026-04-08
+updatedAt: 2026-04-08
+sourceType: local
+vaultPath: imports/alpha.md
+keyFindings: []
+---
+
+## 来源信息
+
+Alpha source overview.
+`,
+    );
+    runCli(["sync"], workspace.env);
+
+    const daemon = await startForegroundDaemon(workspace);
+    foregroundDaemons.push(daemon);
+
+    const overview = await fetchDaemonJson<{
+      totalNodes: number;
+      visibleNodeCount: number;
+      truncated: boolean;
+      nodes: Array<{ id: string; title: string }>;
+    }>(workspace, "/api/dashboard/graph/overview?limit=10");
+    expect(overview.status).toBe(200);
+    expect(overview.payload.totalNodes).toBe(2);
+    expect(overview.payload.visibleNodeCount).toBe(2);
+    expect(overview.payload.truncated).toBe(false);
+    expect(overview.payload.nodes).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: "concepts/graph-thinking.md", title: "Graph Thinking" })]),
+    );
+
+    const search = await fetchDaemonJson<{
+      query: string;
+      resultCount: number;
+      results: Array<{ id: string; title: string; summaryText?: string }>;
+    }>(workspace, "/api/dashboard/graph/search?query=Graph&limit=10");
+    expect(search.status).toBe(200);
+    expect(search.payload.query).toBe("Graph");
+    expect(search.payload.resultCount).toBeGreaterThan(0);
+    expect(search.payload.results).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "concepts/graph-thinking.md",
+          title: "Graph Thinking",
+          summaryText: expect.any(String),
+        }),
+      ]),
+    );
+
+    const pageDetail = await fetchDaemonJson<{
+      page: { id: string; title: string; nodeKey: string };
+      relationCounts: { outgoing: number; incoming: number };
+    }>(
+      workspace,
+      `/api/dashboard/pages/${encodeURIComponent("source-summaries/alpha-source.md")}`,
+    );
+    expect(pageDetail.status).toBe(200);
+    expect(pageDetail.payload.page).toEqual(
+      expect.objectContaining({
+        id: "source-summaries/alpha-source.md",
+        title: "Alpha Source Summary",
+        nodeKey: "alpha-source",
+      }),
+    );
+    expect(pageDetail.payload.relationCounts.outgoing).toBeGreaterThan(0);
+
+    const pageSource = await fetchDaemonJson<{
+      pageSource: { pageId: string; rawMarkdown: string | null };
+      vaultSource: { fileId: string; previewAvailable: boolean; preview: string };
+    }>(
+      workspace,
+      `/api/dashboard/pages/${encodeURIComponent("source-summaries/alpha-source.md")}/source`,
+    );
+    expect(pageSource.status).toBe(200);
+    expect(pageSource.payload.pageSource.pageId).toBe("source-summaries/alpha-source.md");
+    expect(pageSource.payload.pageSource.rawMarkdown).toContain("Alpha Source Summary");
+    expect(pageSource.payload.vaultSource.fileId).toBe("imports/alpha.md");
+    expect(pageSource.payload.vaultSource.preview).toContain("Alpha Source");
+
+    const queueSummary = await fetchDaemonJson<{
+      counts: { total: number; pending: number };
+      generatedAt: string;
+    }>(workspace, "/api/dashboard/queue/summary");
+    expect(queueSummary.status).toBe(200);
+    expect(queueSummary.payload.counts.total).toBeGreaterThanOrEqual(1);
+    expect(queueSummary.payload.generatedAt).toBeTruthy();
+
+    const vaultSummary = await fetchDaemonJson<{
+      totalFiles: number;
+      coverage: { pending: number };
+    }>(workspace, "/api/dashboard/vault/summary");
+    expect(vaultSummary.status).toBe(200);
+    expect(vaultSummary.payload.totalFiles).toBe(1);
+    expect(vaultSummary.payload.coverage.pending).toBeGreaterThanOrEqual(0);
+
+    const vaultFiles = await fetchDaemonJson<{
+      total: number;
+      items: Array<{ fileId: string; generatedPageCount: number }>;
+    }>(workspace, "/api/dashboard/vault/files?limit=10");
+    expect(vaultFiles.status).toBe(200);
+    expect(vaultFiles.payload.total).toBe(1);
+    expect(vaultFiles.payload.items[0]).toEqual(
+      expect.objectContaining({
+        fileId: "imports/alpha.md",
+        generatedPageCount: 1,
+      }),
+    );
+
+    const lintSummary = await fetchDaemonJson<{
+      counts: { total: number; error: number; warning: number; info: number };
+    }>(workspace, "/api/dashboard/lint/summary");
+    expect(lintSummary.status).toBe(200);
+    expect(lintSummary.payload.counts.total).toBeGreaterThanOrEqual(0);
+
+    const status = await fetchDaemonJson<{
+      daemon: { running: boolean; currentTask: string | null };
+      stats: { totalPages: number };
+      queue: { pending: number };
+      doctor: {
+        checks: Array<{ id: string; severity: string; summary: string }>;
+      };
+    }>(workspace, "/api/dashboard/status");
+    expect(status.status).toBe(200);
+    expect(status.payload.daemon.running).toBe(true);
+    expect(status.payload.stats.totalPages).toBe(2);
+    expect(status.payload.doctor.checks[0]).toEqual(
+      expect.objectContaining({
+        id: expect.any(String),
+        severity: expect.any(String),
+        summary: expect.any(String),
+      }),
+    );
+
+    const refresh = await fetchDaemonJson<{ daemon: { running: boolean } }>(workspace, "/api/dashboard/status/refresh", {
+      method: "POST",
+    });
+    expect(refresh.status).toBe(200);
+    expect(refresh.payload.daemon.running).toBe(true);
+
+    await fetchDaemonJson<{ status: string; currentTask: string }>(workspace, "/sync/trigger", {
+      method: "POST",
+    });
+    await waitFor(async () => {
+      const daemonStatus = await fetchDaemonJson<DaemonStatusPayload>(workspace, "/status");
+      return daemonStatus.payload.currentTask === "idle" && daemonStatus.payload.state?.lastRunAt !== null;
+    });
+
+    const sseChunk = await readFirstSseChunk(workspace, "/api/dashboard/logs/stream?history=20");
+    expect(sseChunk).toContain("event: history");
+    expect(sseChunk).toContain("sync-trigger");
   });
 
   it("stops after the current queue batch when shutdown is requested mid-cycle", async () => {

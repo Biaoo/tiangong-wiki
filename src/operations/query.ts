@@ -424,6 +424,7 @@ export function ftsSearchPages(
 
     return rows.map((row) => ({
       ...compactPageSummary(mapPageRow(row, config), config),
+      summaryText: row.summary_text,
       rank: row.rank,
     }));
   } finally {

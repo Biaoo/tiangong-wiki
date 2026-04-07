@@ -6,6 +6,7 @@ import packageJson from "../package.json" with { type: "json" };
 import { registerCheckConfigCommand } from "./commands/check-config.js";
 import { registerCreateCommand } from "./commands/create.js";
 import { registerDaemonCommand } from "./commands/daemon.js";
+import { registerDashboardCommand } from "./commands/dashboard.js";
 import { registerDoctorCommand } from "./commands/doctor.js";
 import { registerExportGraphCommand } from "./commands/export-graph.js";
 import { registerExportIndexCommand } from "./commands/export-index.js";
@@ -64,6 +65,7 @@ function buildProgram(): Command {
   registerExportGraphCommand(program);
   registerExportIndexCommand(program);
   registerDaemonCommand(program);
+  registerDashboardCommand(program);
 
   program
     .command("embed-pending", { hidden: true })

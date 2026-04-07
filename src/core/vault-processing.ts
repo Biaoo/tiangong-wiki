@@ -86,6 +86,8 @@ function mapQueueRow(row: Record<string, unknown>): VaultQueueItem {
     status: row.status as VaultQueueStatus,
     priority: Number(row.priority ?? 0),
     queuedAt: String(row.queuedAt),
+    claimedAt: typeof row.claimedAt === "string" ? row.claimedAt : null,
+    startedAt: typeof row.startedAt === "string" ? row.startedAt : null,
     processedAt: typeof row.processedAt === "string" ? row.processedAt : null,
     resultPageId: typeof row.resultPageId === "string" ? row.resultPageId : null,
     errorMessage: typeof row.errorMessage === "string" ? row.errorMessage : null,
@@ -122,6 +124,8 @@ function claimQueueItems(
         status,
         priority,
         queued_at AS queuedAt,
+        claimed_at AS claimedAt,
+        started_at AS startedAt,
         processed_at AS processedAt,
         result_page_id AS resultPageId,
         error_message AS errorMessage,
@@ -152,17 +156,32 @@ function claimQueueItems(
   const markProcessing = db.prepare(
     `
       UPDATE vault_processing_queue
-      SET status = 'processing', error_message = NULL
-      WHERE file_id = ? AND status IN ('pending', 'error')
+      SET
+        status = 'processing',
+        claimed_at = @claimed_at,
+        started_at = @started_at,
+        error_message = NULL
+      WHERE file_id = @file_id AND status IN ('pending', 'error')
     `,
   );
 
   return db.transaction((claimLimit: number, claimFilterParams: string[]) => {
+    const startedAt = toOffsetIso();
     const items = (select.all(...claimFilterParams, claimLimit) as Array<Record<string, unknown>>).map(mapQueueRow);
     for (const item of items) {
-      markProcessing.run(item.fileId);
+      markProcessing.run(
+        {
+          file_id: item.fileId,
+          claimed_at: startedAt,
+          started_at: startedAt,
+        },
+      );
     }
-    return items;
+    return items.map((item) => ({
+      ...item,
+      claimedAt: startedAt,
+      startedAt,
+    }));
   })(limit, filter.params);
 }
 
@@ -177,6 +196,8 @@ function fetchQueueItemsByStatus(
         status,
         priority,
         queued_at AS queuedAt,
+        claimed_at AS claimedAt,
+        started_at AS startedAt,
         processed_at AS processedAt,
         result_page_id AS resultPageId,
         error_message AS errorMessage,
@@ -217,6 +238,8 @@ function fetchQueueItemByFileId(
         status,
         priority,
         queued_at AS queuedAt,
+        claimed_at AS claimedAt,
+        started_at AS startedAt,
         processed_at AS processedAt,
         result_page_id AS resultPageId,
         error_message AS errorMessage,
@@ -537,6 +560,7 @@ function updateQueueWorkflowError(
         processed_at = @processed_at,
         error_message = @error_message,
         attempts = attempts + 1,
+        started_at = COALESCE(started_at, @processed_at),
         thread_id = COALESCE(@thread_id, thread_id),
         workflow_version = @workflow_version,
         result_manifest_path = COALESCE(@result_manifest_path, result_manifest_path),

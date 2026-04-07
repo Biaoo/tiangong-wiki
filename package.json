@@ -30,24 +30,32 @@
     "node": ">=18"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "clean": "rm -rf dist node_modules/.vitest",
+    "build": "npm run build:cli && npm run build:dashboard",
+    "build:cli": "tsc -p tsconfig.json",
+    "build:dashboard": "vite build --config dashboard/vite.config.ts",
+    "clean": "rm -rf dist node_modules/.vitest node_modules/.vite",
     "dev": "tsx src/index.ts",
+    "dev:dashboard": "vite --config dashboard/vite.config.ts",
     "test": "npm run build && vitest run",
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@fontsource/jetbrains-mono": "^5.2.8",
+    "@fontsource/space-grotesk": "^5.2.10",
     "@openai/codex-sdk": "^0.118.0",
     "better-sqlite3": "^12.8.0",
     "commander": "^14.0.3",
     "gray-matter": "^4.0.3",
+    "preact": "^10.29.1",
     "sqlite-vec": "^0.1.9"
   },
   "devDependencies": {
+    "@preact/preset-vite": "^2.10.5",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^24.5.2",
     "tsx": "^4.21.0",
     "typescript": "^6.0.2",
+    "vite": "^8.0.7",
     "vitest": "^4.1.2"
   }
 }

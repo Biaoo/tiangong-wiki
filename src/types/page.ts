@@ -60,6 +60,8 @@ export interface VaultQueueItem {
   status: VaultQueueStatus;
   priority: number;
   queuedAt: string;
+  claimedAt?: string | null;
+  startedAt?: string | null;
   processedAt: string | null;
   resultPageId: string | null;
   errorMessage: string | null;
@@ -290,6 +292,7 @@ export type DaemonTask =
   | "sync-trigger"
   | "cycle"
   | "create"
+  | "queue-retry"
   | "template-create"
   | "shutdown";
 

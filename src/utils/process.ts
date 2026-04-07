@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
 import { openSync } from "node:fs";
 
+import { AppError } from "./errors.js";
+
 interface Invocation {
   command: string;
   args: string[];
@@ -42,4 +44,34 @@ export function spawnDetachedCurrentProcess(
   });
   child.unref();
   return child.pid;
+}
+
+export function openTarget(target: string): void {
+  let command = "";
+  let args: string[] = [];
+
+  if (process.platform === "darwin") {
+    command = "open";
+    args = [target];
+  } else if (process.platform === "win32") {
+    command = "cmd";
+    args = ["/c", "start", "", target];
+  } else {
+    command = "xdg-open";
+    args = [target];
+  }
+
+  try {
+    const child = spawn(command, args, {
+      detached: true,
+      stdio: "ignore",
+      shell: false,
+    });
+    child.unref();
+  } catch (error) {
+    throw new AppError(
+      `Failed to open target ${target}: ${error instanceof Error ? error.message : String(error)}`,
+      "runtime",
+    );
+  }
 }

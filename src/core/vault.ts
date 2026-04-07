@@ -23,6 +23,12 @@ interface SynologyCacheMetadata {
   fileMtime: number | null;
 }
 
+export interface SynologyCacheStatus {
+  kind: "not-applicable" | "fresh" | "stale" | "missing";
+  localPath: string;
+  metadataPath: string;
+}
+
 function normalizeVaultId(root: string, filePath: string): string {
   return path.relative(root, filePath).split(path.sep).join("/");
 }
@@ -84,6 +90,10 @@ function getSynologyCacheMetaPath(localPath: string): string {
   return `${localPath}.wiki-cache.json`;
 }
 
+export function getSynologyCacheLocalPath(vaultPath: string, file: Pick<VaultFile, "id" | "filePath">): string {
+  return path.join(vaultPath, ...file.id.split("/"));
+}
+
 function readSynologyCacheMetadata(localPath: string): SynologyCacheMetadata | null {
   const metadataPath = getSynologyCacheMetaPath(localPath);
   if (!pathExistsSync(metadataPath)) {
@@ -140,6 +150,42 @@ function isSynologyCacheFresh(localPath: string, file: VaultFile): boolean {
     metadata.fileSize === file.fileSize &&
     metadata.fileMtime === file.fileMtime
   );
+}
+
+export function getSynologyCacheStatus(vaultPath: string, file: VaultFile, env: NodeJS.ProcessEnv = process.env): SynologyCacheStatus {
+  const source = (env.VAULT_SOURCE ?? "local").trim().toLowerCase();
+  const localPath = getSynologyCacheLocalPath(vaultPath, file);
+  const metadataPath = getSynologyCacheMetaPath(localPath);
+
+  if (source !== "synology") {
+    return {
+      kind: "not-applicable",
+      localPath: file.filePath,
+      metadataPath,
+    };
+  }
+
+  if (isSynologyCacheFresh(localPath, file)) {
+    return {
+      kind: "fresh",
+      localPath,
+      metadataPath,
+    };
+  }
+
+  if (pathExistsSync(localPath)) {
+    return {
+      kind: "stale",
+      localPath,
+      metadataPath,
+    };
+  }
+
+  return {
+    kind: "missing",
+    localPath,
+    metadataPath,
+  };
 }
 
 function parseJsonPayload(raw: string): unknown {
@@ -324,7 +370,7 @@ export async function ensureLocalVaultFile(
     throw new AppError("VAULT_SYNOLOGY_REMOTE_PATH is required when VAULT_SOURCE=synology", "config");
   }
 
-  const localPath = path.join(vaultPath, ...file.id.split("/"));
+  const localPath = getSynologyCacheLocalPath(vaultPath, file);
   if (isSynologyCacheFresh(localPath, file)) {
     return localPath;
   }
@@ -439,6 +485,8 @@ export function syncVaultIndex(
         status,
         priority,
         queued_at,
+        claimed_at,
+        started_at,
         processed_at,
         result_page_id,
         error_message,
@@ -462,6 +510,8 @@ export function syncVaultIndex(
         NULL,
         NULL,
         NULL,
+        NULL,
+        NULL,
         0,
         NULL,
         NULL,
@@ -482,6 +532,14 @@ export function syncVaultIndex(
         END,
         priority = excluded.priority,
         queued_at = excluded.queued_at,
+        claimed_at = CASE
+          WHEN vault_processing_queue.status = 'processing' THEN vault_processing_queue.claimed_at
+          ELSE NULL
+        END,
+        started_at = CASE
+          WHEN vault_processing_queue.status = 'processing' THEN vault_processing_queue.started_at
+          ELSE NULL
+        END,
         processed_at = CASE
           WHEN vault_processing_queue.status = 'processing' THEN vault_processing_queue.processed_at
           ELSE NULL
