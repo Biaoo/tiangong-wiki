@@ -6,6 +6,7 @@ import type { Edge, Page, ParsePageResult, ParsedPage } from "../types/page.js";
 import { getTemplate } from "./config.js";
 import { normalizePageId } from "./paths.js";
 import { camelToSnake, humanizeFieldName } from "../utils/case.js";
+import { toDateOnly } from "../utils/time.js";
 
 const FIXED_FIELDS = new Set([
   "pageType",
@@ -63,13 +64,18 @@ function normalizeColumnValue(value: unknown): unknown {
   return normalized;
 }
 
-function normalizeDateField(value: unknown): string | null {
-  if (typeof value === "string" && value.trim()) {
-    return value.trim();
-  }
+export function normalizeDateField(value: unknown): string | null {
   if (value instanceof Date) {
     return value.toISOString().slice(0, 10);
   }
+
+  if (typeof value === "string" && value.trim()) {
+    const dateOnly = value.trim().slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) {
+      return dateOnly;
+    }
+  }
+
   return null;
 }
 
@@ -248,6 +254,7 @@ function buildExtraAndColumns(
 
 export function parsePage(filePath: string, wikiPath: string, config: LoadedWikiConfig): ParsePageResult {
   const pageId = normalizePageId(filePath, wikiPath);
+  const today = toDateOnly();
   let parsedMatter: matter.GrayMatterFile<string>;
 
   try {
@@ -329,8 +336,8 @@ export function parsePage(filePath: string, wikiPath: string, config: LoadedWiki
     summaryText: "",
     embeddingStatus: "pending",
     fileMtime: null,
-    createdAt: normalizeDateField(data.createdAt),
-    updatedAt: normalizeDateField(data.updatedAt),
+    createdAt: normalizeDateField(data.createdAt) ?? today,
+    updatedAt: normalizeDateField(data.updatedAt) ?? today,
     indexedAt: null,
   };
 

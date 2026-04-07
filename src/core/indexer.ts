@@ -7,11 +7,11 @@ import type {
   ScanEntry,
   ScanResult,
 } from "../types/page.js";
-import { parsePage } from "./frontmatter.js";
+import { normalizeDateField, parsePage } from "./frontmatter.js";
 import { rebuildFts } from "./db.js";
 import { normalizePageId, resolvePagePath } from "./paths.js";
 import { fileStatSync, listFilesRecursiveSync, pathExistsSync, sha256FileSync } from "../utils/fs.js";
-import { toOffsetIso } from "../utils/time.js";
+import { toDateOnly, toOffsetIso } from "../utils/time.js";
 
 function getExistingPages(db: Database.Database): Map<string, { filePath: string; contentHash: string | null }> {
   const rows = db
@@ -234,7 +234,7 @@ export function applyChanges(
   const insertStatement = db.prepare(buildInsertStatement(config));
   const updateStatement = db.prepare(buildUpdateStatement(config));
   const selectExistingPage = db.prepare(
-    "SELECT rowid, summary_text AS summaryText, embedding_status AS embeddingStatus FROM pages WHERE id = ?",
+    "SELECT rowid, summary_text AS summaryText, embedding_status AS embeddingStatus, created_at AS createdAt FROM pages WHERE id = ?",
   );
   const deleteEdgesBySourcePage = db.prepare("DELETE FROM edges WHERE source_page = ?");
   const insertEdge = db.prepare(
@@ -256,10 +256,16 @@ export function applyChanges(
   const transaction = db.transaction(() => {
     for (const { entry, parsed } of parsedEntries) {
       const existing = selectExistingPage.get(entry.id) as
-        | { rowid: number; summaryText: string | null; embeddingStatus: string | null }
+        | { rowid: number; summaryText: string | null; embeddingStatus: string | null; createdAt: string | null }
         | undefined;
       const isInsert = !existing;
       const summaryChanged = isInsert || existing.summaryText !== parsed.summaryText;
+      const today = toDateOnly();
+      parsed.page.createdAt =
+        normalizeDateField(parsed.rawData.createdAt) ?? existing?.createdAt ?? today;
+      parsed.page.updatedAt = isInsert
+        ? normalizeDateField(parsed.rawData.updatedAt) ?? today
+        : today;
       const row = serializeRow(
         parsed,
         entry,

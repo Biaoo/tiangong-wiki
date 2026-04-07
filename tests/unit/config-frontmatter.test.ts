@@ -1,5 +1,5 @@
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DEFAULT_VAULT_FILE_TYPES, loadConfig } from "../../src/core/config.js";
 import { parsePage } from "../../src/core/frontmatter.js";
@@ -106,5 +106,50 @@ title: Bad Page
 
     const config = loadConfig(path.join(workspace.wikiRoot, "wiki.config.json"));
     expect(config.vaultFileTypes).toEqual(["pdf", "txt", "yaml"]);
+  });
+
+  it("normalizes ISO date strings and falls back missing dates to today", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-07T12:34:56Z"));
+
+    try {
+      const workspace = createWorkspace();
+      workspaces.push(workspace);
+      bootstrapRuntimeAssets(workspace);
+
+      const config = loadConfig(path.join(workspace.wikiRoot, "wiki.config.json"));
+      const filePath = writePage(
+        workspace,
+        "concepts/date-normalized.md",
+        `---
+pageType: concept
+title: Date Normalized
+nodeId: date-normalized
+status: active
+visibility: shared
+sourceRefs: []
+relatedPages: []
+tags: []
+createdAt: 2026-04-06T08:09:10.000Z
+confidence: high
+masteryLevel: medium
+prerequisites: []
+---
+
+Date normalization should strip time and populate updatedAt when omitted.
+`,
+      );
+
+      const result = parsePage(filePath, workspace.wikiPath, config);
+      expect(result.ok).toBe(true);
+      if (!result.ok) {
+        return;
+      }
+
+      expect(result.parsed.page.createdAt).toBe("2026-04-06");
+      expect(result.parsed.page.updatedAt).toBe("2026-04-07");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
