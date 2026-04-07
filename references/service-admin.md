@@ -31,6 +31,7 @@ Layer 2: Local Service
 
 service 层负责：
 
+- 引导安装用户先完成 `wiki setup` / `wiki doctor`
 - 定时或手动执行 `wiki sync`
 - 写入 `vault_files`、`vault_changelog`、`vault_processing_queue`
 - 维护 daemon PID、state、log
@@ -229,6 +230,8 @@ service 会拒绝：
 ## 8. Daemon 命令
 
 ```bash
+wiki setup
+wiki doctor
 wiki daemon start
 wiki daemon stop
 wiki daemon status
@@ -237,6 +240,8 @@ wiki daemon status --format json
 
 含义：
 
+- `setup`：首次安装时生成 `.wiki.env` 并 scaffold 工作区
+- `doctor`：在启动服务前确认路径、配置和 agent 凭证状态
 - `start`：后台启动定时 worker
 - `stop`：向 daemon 发送 `SIGTERM`
 - `status`：查看运行状态、上次运行时间、下次同步时间

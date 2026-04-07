@@ -1,18 +1,11 @@
 import { Command } from "commander";
-import path from "node:path";
 
-import { resolveRuntimePaths } from "../core/paths.js";
 import { EmbeddingClient } from "../core/embedding.js";
+import { resolveRuntimePaths } from "../core/paths.js";
 import { syncWorkspace } from "../core/sync.js";
 import { getWikiAgentStatus } from "../core/vault-processing.js";
+import { scaffoldWorkspaceAssets } from "../core/workspace-bootstrap.js";
 import { AppError } from "../utils/errors.js";
-import {
-  copyDirectoryContentsSync,
-  copyFileIfMissingSync,
-  ensureDirSync,
-  isDirectoryEmptySync,
-  pathExistsSync,
-} from "../utils/fs.js";
 import { spawnDetachedCurrentProcess } from "../utils/process.js";
 import { writeJson } from "../utils/output.js";
 
@@ -23,19 +16,14 @@ export function registerInitCommand(program: Command): void {
     .option("--force", "Force a full rebuild of the index")
     .action(async (options) => {
       const paths = resolveRuntimePaths(process.env);
-      ensureDirSync(paths.wikiRoot);
-      ensureDirSync(paths.wikiPath);
-      ensureDirSync(paths.templatesPath);
-
-      const defaultConfigPath = path.join(paths.packageRoot, "assets", "wiki.config.default.json");
-      const defaultTemplatesPath = path.join(paths.packageRoot, "assets", "templates");
-
-      const copiedConfig = copyFileIfMissingSync(defaultConfigPath, paths.configPath);
-      let copiedTemplates = 0;
-      if (isDirectoryEmptySync(paths.templatesPath) && pathExistsSync(defaultTemplatesPath)) {
-        copyDirectoryContentsSync(defaultTemplatesPath, paths.templatesPath);
-        copiedTemplates = 1;
-      }
+      const bootstrap = scaffoldWorkspaceAssets({
+        packageRoot: paths.packageRoot,
+        wikiRoot: paths.wikiRoot,
+        wikiPath: paths.wikiPath,
+        vaultPath: paths.vaultPath,
+        templatesPath: paths.templatesPath,
+        configPath: paths.configPath,
+      });
 
       const structuredSync = await syncWorkspace({
         force: options.force === true,
@@ -59,8 +47,8 @@ export function registerInitCommand(program: Command): void {
 
       writeJson({
         initialized: true,
-        copiedConfig,
-        copiedTemplates,
+        copiedConfig: bootstrap.copiedConfig,
+        copiedTemplates: bootstrap.copiedTemplates,
         sync: structuredSync,
         backgroundEmbeddingStarted,
         ...(backgroundEmbeddingStarted ? { backgroundPid } : {}),

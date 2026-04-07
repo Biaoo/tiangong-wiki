@@ -19,6 +19,8 @@ npm run dev -- <command> [options]
 
 | 命令 | 说明 | Agent 常用度 |
 | --- | --- | --- |
+| `setup` | 交互式完整配置向导，写 `.wiki.env` 并 scaffold 工作区 | 一次性 |
+| `doctor` | 诊断当前配置、路径、embedding、agent、daemon 状态 | 高 |
 | `init` | 初始化 index.db，执行首次全量同步 | 一次性 |
 | `sync` | 增量同步索引 | 高 |
 | `create` | 从模板创建新页面 | 高 |
@@ -43,6 +45,48 @@ npm run dev -- <command> [options]
 ---
 
 ## 命令详细
+
+### setup
+
+```bash
+wiki setup
+```
+
+按 step-by-step 的方式完成完整配置流程：
+
+- 记录 `WIKI_PATH`、`VAULT_PATH`、`WIKI_DB_PATH`、`WIKI_CONFIG_PATH`、`WIKI_TEMPLATES_PATH`
+- 记录 `WIKI_SYNC_INTERVAL`
+- 可选配置 `EMBEDDING_*`
+- 可选配置 `WIKI_AGENT_*`
+- 在当前工作目录写入 `.wiki.env`
+- scaffold `wiki/pages/`、`vault/`、`wiki.config.json`、`templates/`
+
+`setup` 是安装向导，不会替代 `wiki init`。完成后仍应执行：
+
+```bash
+wiki doctor
+wiki init
+```
+
+### doctor
+
+```bash
+wiki doctor
+wiki doctor --probe
+wiki doctor --format json
+```
+
+检查项包括：
+
+- `.wiki.env` / `WIKI_ENV_FILE` 是否已加载
+- `WIKI_PATH`、`VAULT_PATH`、`WIKI_TEMPLATES_PATH` 是否存在且可读写
+- `WIKI_DB_PATH` 是否可创建或可读写
+- `wiki.config.json` 是否可加载，模板文件是否齐全
+- embedding 配置是否完整；`--probe` 时额外测试 endpoint
+- `WIKI_AGENT_*` 是否完整
+- daemon 是否运行、PID/state 是否一致
+
+有 error 时命令返回 exit code `2`，同时仍会把诊断结果输出到 stdout。
 
 ### init
 
@@ -569,10 +613,11 @@ wiki check-config --probe            # 同上 + 测试 embedding API 连通性
 | --- | --- | --- | --- |
 | 查询 | find, search, fts, graph, page-info, list, stat, vault list, vault diff, vault queue | JSON to stdout | —（默认即 JSON） |
 | 变更 | init, sync, create, template create | JSON result to stdout | —（默认即 JSON） |
+| 向导 | setup | interactive text | — |
 | 校验 | lint | human-readable text | `--format json` |
 | 导出 | export-graph | JSON | — |
 | 导出 | export-index | Markdown | — |
-| 信息 | check-config, template list, template show, type list, type show, type recommend, daemon status | human-readable text | `--format json` |
+| 信息 | doctor, check-config, template list, template show, type list, type show, type recommend, daemon status | human-readable text | `--format json` |
 
 ### 错误输出
 

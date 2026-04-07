@@ -80,6 +80,7 @@ concept · misconception · bridge · source-summary · lesson · method · pers
 ## CLI 命令
 
 ```text
+安装引导    setup · doctor
 索引管理    init · sync · check-config
 结构化查询  find [--type] [--status] [--tag]
 全文搜索    fts <query>
@@ -129,14 +130,40 @@ vault 新文件 → vault_processing_queue (pending)
               模板演化守卫（默认 proposal_only）
 ```
 
+## 安装
+
+### 从 npm 安装
+
+```bash
+npm install -g @tiangong-lca/wiki
+wiki --version
+```
+
+### 本地开发安装
+
+```bash
+# 在 wiki 源码目录中
+cd wiki/
+npm install && npm run build
+
+# 方式一：npm link（推荐，改代码后 rebuild 即生效）
+npm link
+wiki --version
+
+# 方式二：直接运行编译产物
+node dist/index.js --version
+```
+
+`npm link` 会在全局 bin 目录创建 `wiki` 符号链接，指向当前目录的 `dist/index.js`。卸载用 `npm unlink -g @tiangong-lca/wiki`。
+
 ## 快速开始
 
 ```bash
-# 安装依赖 & 编译
-npm install && npm run build
+# 运行完整配置向导（写入 .wiki.env）
+wiki setup
 
-# 设置环境变量
-export WIKI_PATH=/path/to/workspace/wiki/pages
+# 自检
+wiki doctor
 
 # 初始化工作区
 wiki init
@@ -153,8 +180,16 @@ wiki graph bayes-theorem --depth 2
 
 ## 环境变量
 
+推荐做法：
+
+- 首次安装时运行 `wiki setup`
+- `wiki setup` 会写入当前工作目录下的 `.wiki.env`
+- CLI 启动时会自动发现最近的 `.wiki.env`
+- 也可以显式设置 `WIKI_ENV_FILE=/absolute/path/to/.wiki.env`
+
 | 变量 | 必需 | 说明 |
 |------|------|------|
+| `WIKI_ENV_FILE` | 否 | 显式指定要加载的 `.wiki.env` 文件 |
 | `WIKI_PATH` | 是 | 知识库页面目录（精确到 `pages/`） |
 | `VAULT_PATH` | 否 | 外部素材目录（默认 `../vault`） |
 | `WIKI_DB_PATH` | 否 | SQLite 数据库路径（默认 `../index.db`） |
@@ -179,7 +214,7 @@ npm run test:watch    # watch 模式
 
 ```text
 src/
-├── commands/          # 18 个 CLI 命令实现
+├── commands/          # CLI 命令实现
 ├── core/              # 核心业务逻辑
 │   ├── db.ts          # SQLite schema 初始化、动态列管理
 │   ├── sync.ts        # 6 步同步编排

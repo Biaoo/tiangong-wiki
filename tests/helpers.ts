@@ -15,6 +15,18 @@ export interface Workspace {
   env: NodeJS.ProcessEnv;
 }
 
+const SANITIZED_ENV_PREFIXES = ["WIKI_", "VAULT_", "EMBEDDING_", "OPENROUTER_"];
+
+function sanitizeInheritedCliEnv(sourceEnv: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const env = { ...sourceEnv };
+  for (const key of Object.keys(env)) {
+    if (key === "WIKI_ENV_FILE" || SANITIZED_ENV_PREFIXES.some((prefix) => key.startsWith(prefix))) {
+      delete env[key];
+    }
+  }
+  return env;
+}
+
 export function projectRoot(): string {
   return path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 }
@@ -51,7 +63,7 @@ export function createWorkspace(extraEnv: NodeJS.ProcessEnv = {}): Workspace {
     wikiPath,
     vaultPath,
     env: {
-      ...process.env,
+      ...sanitizeInheritedCliEnv(),
       WIKI_PATH: wikiPath,
       VAULT_PATH: vaultPath,
       WIKI_SYNC_INTERVAL: "1",

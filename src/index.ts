@@ -6,6 +6,7 @@ import packageJson from "../package.json" with { type: "json" };
 import { registerCheckConfigCommand } from "./commands/check-config.js";
 import { registerCreateCommand } from "./commands/create.js";
 import { registerDaemonCommand } from "./commands/daemon.js";
+import { registerDoctorCommand } from "./commands/doctor.js";
 import { registerExportGraphCommand } from "./commands/export-graph.js";
 import { registerExportIndexCommand } from "./commands/export-index.js";
 import { registerFindCommand } from "./commands/find.js";
@@ -16,11 +17,13 @@ import { registerLintCommand } from "./commands/lint.js";
 import { registerListCommand } from "./commands/list.js";
 import { registerPageInfoCommand } from "./commands/page-info.js";
 import { registerSearchCommand } from "./commands/search.js";
+import { registerSetupCommand } from "./commands/setup.js";
 import { registerStatCommand } from "./commands/stat.js";
 import { registerSyncCommand } from "./commands/sync.js";
 import { registerTemplateCommand } from "./commands/template.js";
 import { registerTypeCommand } from "./commands/type.js";
 import { registerVaultCommand } from "./commands/vault.js";
+import { applyCliEnvironment } from "./core/cli-env.js";
 import { loadRuntimeConfig } from "./core/runtime.js";
 import { embedPendingPages } from "./core/sync.js";
 import { processVaultQueueBatch } from "./core/vault-processing.js";
@@ -41,7 +44,9 @@ function buildProgram(): Command {
     runtimeConfig = undefined;
   }
 
+  registerSetupCommand(program);
   registerInitCommand(program);
+  registerDoctorCommand(program);
   registerSyncCommand(program);
   registerCheckConfigCommand(program);
   registerFindCommand(program, runtimeConfig);
@@ -78,6 +83,7 @@ function buildProgram(): Command {
 }
 
 try {
+  applyCliEnvironment(process.env, process.cwd());
   const program = buildProgram();
   await program.parseAsync(process.argv);
 } catch (error) {

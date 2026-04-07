@@ -2,8 +2,17 @@
 
 ## Required
 
+The CLI loads configuration in this order:
+
+1. existing `process.env`
+2. explicit `WIKI_ENV_FILE`
+3. nearest auto-discovered `.wiki.env` in the current working directory or its parents
+
+`wiki setup` writes a `.wiki.env` file that follows this contract. Real process env vars still win over file values.
+
 | Variable | Description | Example |
 | --- | --- | --- |
+| `WIKI_ENV_FILE` | Optional path to a `.wiki.env` file to load before resolving runtime paths | `/data/workspace/.wiki.env` |
 | `WIKI_PATH` | Absolute path to `wiki/pages/` | `/data/workspace/wiki/pages` |
 
 ## Core Optional Paths
