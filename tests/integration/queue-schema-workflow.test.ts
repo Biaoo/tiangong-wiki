@@ -113,7 +113,7 @@ describe("queue schema workflow fields", () => {
         updatedPageIds: JSON.stringify(["methods/review.md"]),
         appliedTypeNames: JSON.stringify(["concept", "method"]),
         proposedTypeNames: JSON.stringify(["lab-report"]),
-        skillsUsed: JSON.stringify(["wiki-skill", "pdf"]),
+        skillsUsed: JSON.stringify(["tiangong-wiki-skill", "pdf"]),
       });
     } finally {
       db.close();
@@ -146,7 +146,7 @@ describe("queue schema workflow fields", () => {
       updatedPageIds: '["methods/review.md"]',
       appliedTypeNames: '["concept","method"]',
       proposedTypeNames: '["lab-report"]',
-      skillsUsed: '["wiki-skill","pdf"]',
+      skillsUsed: '["tiangong-wiki-skill","pdf"]',
     });
   });
 });

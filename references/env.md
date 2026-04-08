@@ -1,6 +1,6 @@
 # Environment Variables
 
-All configuration is managed through `.wiki.env` (created by `wiki setup`). Variables can also be set in shell environment or a `.env` file.
+All configuration is managed through `.wiki.env` (created by `tiangong-wiki setup`). Variables can also be set in shell environment or a `.env` file.
 
 ---
 

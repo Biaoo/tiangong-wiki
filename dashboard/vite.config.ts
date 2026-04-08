@@ -141,7 +141,7 @@ async function isHealthyDaemon(target: { host: string; port: number }): Promise<
     }
 
     const payload = (await response.json()) as { ok?: boolean; service?: string };
-    return payload.ok === true && payload.service === "wiki-daemon";
+    return payload.ok === true && payload.service === "tiangong-wiki-daemon";
   } catch {
     return false;
   } finally {

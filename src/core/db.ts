@@ -346,7 +346,7 @@ export function openDb(
   if (storedSchemaVersion && storedSchemaVersion !== SCHEMA_VERSION) {
     db.close();
     throw new AppError(
-      `Schema version mismatch: expected ${SCHEMA_VERSION}, found ${storedSchemaVersion}. Run wiki init --force.`,
+      `Schema version mismatch: expected ${SCHEMA_VERSION}, found ${storedSchemaVersion}. Run tiangong-wiki init --force.`,
       "config",
     );
   }

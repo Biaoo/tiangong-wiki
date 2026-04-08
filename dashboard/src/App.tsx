@@ -28,7 +28,7 @@ import type {
 } from "./types/dashboard";
 import { readUrlState, writeUrlState } from "./utils/urlState";
 
-const INTRO_STORAGE_KEY = "wiki-dashboard-intro-complete";
+const INTRO_STORAGE_KEY = "tiangong-wiki-dashboard-intro-complete";
 
 function toErrorMessage(error: unknown): string {
   if (error instanceof DashboardApiError && error.bodyText) {

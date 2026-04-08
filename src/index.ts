@@ -33,8 +33,8 @@ import { handleCliError, writeJson } from "./utils/output.js";
 function buildProgram(): Command {
   const program = new Command();
   program
-    .name("wiki")
-    .description("Local-first wiki indexing and query CLI")
+    .name("tiangong-wiki")
+    .description("Tiangong Wiki — local-first indexing and query CLI")
     .version(packageJson.version)
     .showHelpAfterError();
 

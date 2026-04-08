@@ -38,7 +38,7 @@ describe("daemon workflow observability", () => {
       decision: "apply",
       reason: "Routed the source into the method ontology and proposed a new related type.",
       threadId,
-      skillsUsed: ["wiki-skill", "pdf"],
+      skillsUsed: ["tiangong-wiki-skill", "pdf"],
       createdPageIds: ["methods/evidence-review.md"],
       updatedPageIds: ["concepts/evidence-ops.md"],
       appliedTypeNames: ["method", "concept"],
@@ -88,7 +88,7 @@ describe("daemon workflow observability", () => {
     );
     const completionLog = logs.find((message) => message.includes("imports/evidence-review.pdf: done"));
     expect(completionLog).toContain("decision=apply");
-    expect(completionLog).toContain("skills=wiki-skill,pdf");
+    expect(completionLog).toContain("skills=tiangong-wiki-skill,pdf");
     expect(completionLog).toContain("created=methods/evidence-review.md");
     expect(completionLog).toContain("updated=concepts/evidence-ops.md");
     expect(completionLog).toContain("proposed=evidence-brief");
@@ -115,7 +115,7 @@ describe("daemon workflow observability", () => {
           status: "done",
           threadId: "fake-thread-1",
           decision: "apply",
-          skillsUsed: ["wiki-skill", "pdf"],
+          skillsUsed: ["tiangong-wiki-skill", "pdf"],
           createdPageIds: ["methods/evidence-review.md"],
           updatedPageIds: ["concepts/evidence-ops.md"],
           proposedTypeNames: ["evidence-brief"],
@@ -124,6 +124,6 @@ describe("daemon workflow observability", () => {
     );
 
     const item = queue.items.find((entry) => entry.fileId === "imports/evidence-review.pdf");
-    expect(item?.resultManifestPath).toContain("/wiki/.queue-artifacts/");
+    expect(item?.resultManifestPath).toContain("/tiangong-wiki/.queue-artifacts/");
   });
 });

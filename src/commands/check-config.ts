@@ -63,7 +63,7 @@ export function registerCheckConfigCommand(program: Command): void {
 
       writeText(
         [
-          "wiki check-config",
+          "tiangong-wiki check-config",
           formatKeyValueLines({
             wikiPath: paths.wikiPath,
             vaultPath: paths.vaultPath,

@@ -126,7 +126,7 @@ function normalizeDashboardPageId(input: string, wikiPath: string): string {
   if (input.endsWith(".md") || path.isAbsolute(input)) {
     const relative = path.relative(wikiPath, path.resolve(wikiPath, input));
     if (relative.startsWith("..")) {
-      throw new AppError(`Path is outside wiki/pages: ${input}`, "config");
+      throw new AppError(`Path is outside pages directory: ${input}`, "config");
     }
     return relative.split(path.sep).join("/");
   }

@@ -12,15 +12,15 @@ The judgment layer is the agent: deciding whether knowledge is durable, which pa
 - Re-index every edited page immediately.
 
 ## Daily Maintenance Loop
-1. Run `wiki sync`.
-2. Run `wiki stat`.
-3. Run `wiki lint`.
+1. Run `tiangong-wiki sync`.
+2. Run `tiangong-wiki stat`.
+3. Run `tiangong-wiki lint`.
 4. Review `error` findings first.
 5. Review `warning` findings that indicate stale, orphaned, or weakly connected knowledge.
-6. Use `wiki find`, `wiki fts`, `wiki search`, or `wiki graph` to locate the best target page.
+6. Use `tiangong-wiki find`, `tiangong-wiki fts`, `tiangong-wiki search`, or `tiangong-wiki graph` to locate the best target page.
 7. Edit Markdown in `wiki/pages/`.
-8. Run `wiki sync --path <page-id>`.
-9. Re-run `wiki lint --path <page-id>` when the change is localized.
+8. Run `tiangong-wiki sync --path <page-id>`.
+9. Re-run `tiangong-wiki lint --path <page-id>` when the change is localized.
 
 ## PageType Selection Table
 | pageType | Use When | Typical Trigger | Notes |
@@ -39,11 +39,11 @@ The judgment layer is the agent: deciding whether knowledge is durable, which pa
 
 ## Update Vs Create Decision Flow
 1. Start with a retrieval pass.
-2. If you know the target page type or node id, use `wiki find`.
-3. If you only know a phrase, use `wiki fts`.
-4. If the intent is fuzzy and embeddings are available, use `wiki search`.
-5. Inspect the top candidate with `wiki page-info`.
-6. When creating something new, inspect the ontology with `wiki type list`, `wiki type show`, or `wiki type recommend`.
+2. If you know the target page type or node id, use `tiangong-wiki find`.
+3. If you only know a phrase, use `tiangong-wiki fts`.
+4. If the intent is fuzzy and embeddings are available, use `tiangong-wiki search`.
+5. Inspect the top candidate with `tiangong-wiki page-info`.
+6. When creating something new, inspect the ontology with `tiangong-wiki type list`, `tiangong-wiki type show`, or `tiangong-wiki type recommend`.
 7. Update the existing page when one of these is true:
    - The new material extends the same node or page intent.
    - The existing page already answers at least 70% of the need.
@@ -56,12 +56,12 @@ The judgment layer is the agent: deciding whether knowledge is durable, which pa
 ## Create Workflow
 1. Confirm no suitable active page exists.
 2. Choose the page type from the table above.
-3. Run `wiki create --type <pageType> --title "<title>" [--node-id <nodeId>]`.
+3. Run `tiangong-wiki create --type <pageType> --title "<title>" [--node-id <nodeId>]`.
 4. Open the created Markdown file and fill the frontmatter-specific fields.
 5. Fill every body section in the template with concrete content, not placeholders.
 6. Add `sourceRefs` and `relatedPages` where appropriate.
-7. Run `wiki sync --path <page-id>`.
-8. Run `wiki lint --path <page-id> --format json`.
+7. Run `tiangong-wiki sync --path <page-id>`.
+8. Run `tiangong-wiki lint --path <page-id> --format json`.
 
 ## Update Workflow
 1. Find the existing page.
@@ -70,8 +70,8 @@ The judgment layer is the agent: deciding whether knowledge is durable, which pa
 4. Add or revise `sourceRefs`.
 5. Add or revise `relatedPages` and page-type relation fields such as `prerequisites` or `correctedConcepts`.
 6. Preserve existing durable content unless it is wrong or superseded.
-7. Run `wiki sync --path <page-id>`.
-8. Run `wiki lint --path <page-id>`.
+7. Run `tiangong-wiki sync --path <page-id>`.
+8. Run `tiangong-wiki lint --path <page-id>`.
 
 ## Archive Decision Rules
 Archive by setting `status: archived` when at least one of these is true:
@@ -88,12 +88,12 @@ Archived pages remain valuable as provenance or historical context.
 - The content is still too vague to classify and belongs in a short-lived working draft elsewhere.
 
 ## Query Command Selection During Maintenance
-- Exact metadata filter: `wiki find`
-- Keyword hunt: `wiki fts`
-- Fuzzy intent: `wiki search`
-- One page inspection: `wiki page-info`
-- Network exploration: `wiki graph`
-- Workspace overview: `wiki stat`
+- Exact metadata filter: `tiangong-wiki find`
+- Keyword hunt: `tiangong-wiki fts`
+- Fuzzy intent: `tiangong-wiki search`
+- One page inspection: `tiangong-wiki page-info`
+- Network exploration: `tiangong-wiki graph`
+- Workspace overview: `tiangong-wiki stat`
 
 ## Graph-Driven Exploration
 Use graph traversal when you suspect there is existing context around a concept but a simple keyword search is too shallow.
@@ -164,10 +164,10 @@ Use this flow when recurring memory entries have become reusable knowledge:
 ```text
 1. Review the memory entry
 2. Ask: is this still valuable after the current day or week?
-3. wiki find --type concept --node-id <candidate-node>
+3. tiangong-wiki find --type concept --node-id <candidate-node>
 4. If a page exists, update it
 5. If not, create the appropriate concept, lesson, method, or faq page
-6. wiki sync --path <page-id>
+6. tiangong-wiki sync --path <page-id>
 ```
 
 ## Profile To Wiki
@@ -178,7 +178,7 @@ Use this flow when structured profile data should appear in wiki pages:
 2. Decide whether it belongs in achievement, resume, or person pages
 3. Update frontmatter and body content with verifiable details
 4. Preserve provenance through sourceRefs when appropriate
-5. wiki sync --path <page-id>
+5. tiangong-wiki sync --path <page-id>
 ```
 
 ## Quality Checklist Before Finishing
@@ -187,4 +187,4 @@ Use this flow when structured profile data should appear in wiki pages:
 - `sourceRefs` is non-empty when knowledge came from sources.
 - Graph-related fields are populated where relevant.
 - The page is not an accidental orphan unless that is intentional.
-- `wiki lint` returns no errors for the changed page.
+- `tiangong-wiki lint` returns no errors for the changed page.

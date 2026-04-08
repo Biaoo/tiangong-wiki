@@ -30,7 +30,7 @@ function createSkipRunner() {
     decision: "skip",
     reason: `Skipped ${queueItemId}.`,
     threadId,
-    skillsUsed: ["wiki-skill"],
+    skillsUsed: ["tiangong-wiki-skill"],
     createdPageIds: [],
     updatedPageIds: [],
     appliedTypeNames: [],

@@ -71,7 +71,7 @@ export function resolveWorkspaceSkillPaths(wikiPath: string): WorkspaceSkillPath
   return {
     workspaceRoot,
     skillsRoot,
-    wikiSkillPath: path.join(skillsRoot, "wiki-skill"),
+    wikiSkillPath: path.join(skillsRoot, "tiangong-wiki-skill"),
   };
 }
 
@@ -174,7 +174,7 @@ export function ensureWikiSkillInstall(
 ): WikiSkillInstallResult {
   const paths = resolveWorkspaceSkillPaths(wikiPath);
   const packageRealPath = realpathSync(packageRoot);
-  const existing = inspectSkillInstall(paths.wikiSkillPath, "wiki-skill");
+  const existing = inspectSkillInstall(paths.wikiSkillPath, "tiangong-wiki-skill");
 
   ensureDirSync(paths.skillsRoot);
 
@@ -213,7 +213,7 @@ export function ensureWikiSkillInstall(
       `workspace skill path is occupied and cannot be reused: ${paths.wikiSkillPath}`,
       "config",
       {
-        skillName: "wiki-skill",
+        skillName: "tiangong-wiki-skill",
         skillPath: paths.wikiSkillPath,
       },
     );

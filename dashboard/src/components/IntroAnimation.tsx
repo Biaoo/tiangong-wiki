@@ -17,7 +17,7 @@ interface FragmentToken {
   delayMs: number;
 }
 
-const VISITED_KEY = "wiki-dashboard-intro-complete";
+const VISITED_KEY = "tiangong-wiki-dashboard-intro-complete";
 
 const PHASES = {
   heartbeat: 800,

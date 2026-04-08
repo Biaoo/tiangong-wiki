@@ -17,21 +17,21 @@ describe("workflow prompt shape", () => {
     const prompt = buildVaultWorkflowPrompt({
       workspaceRoot: "/tmp/workspace",
       vaultFilePath: "/tmp/workspace/vault/imports/spec.pdf",
-      resultJsonPath: "/tmp/workspace/wiki/.queue-artifacts/spec/result.json",
+      resultJsonPath: "/tmp/workspace/tiangong-wiki/.queue-artifacts/spec/result.json",
       allowTemplateEvolution: false,
     });
 
     expect(prompt).toContain("WORKSPACE_ROOT=/tmp/workspace");
     expect(prompt).toContain("VAULT_FILE_PATH=/tmp/workspace/vault/imports/spec.pdf");
-    expect(prompt).toContain("RESULT_JSON_PATH=/tmp/workspace/wiki/.queue-artifacts/spec/result.json");
+    expect(prompt).toContain("RESULT_JSON_PATH=/tmp/workspace/tiangong-wiki/.queue-artifacts/spec/result.json");
     expect(prompt).toContain("ALLOW_TEMPLATE_EVOLUTION=false");
     expect(prompt).toContain("## Environment");
     expect(prompt).toContain("Workspace-local skills are available from WORKSPACE_ROOT");
-    expect(prompt).toContain("wiki type list");
-    expect(prompt).toContain("wiki template show <type>");
-    expect(prompt).toContain("wiki page-info <pageId>");
+    expect(prompt).toContain("tiangong-wiki type list");
+    expect(prompt).toContain("tiangong-wiki template show <type>");
+    expect(prompt).toContain("tiangong-wiki page-info <pageId>");
     expect(prompt).toContain("## Step 1 — Read and Discover");
-    expect(prompt).toContain("Discover the current page type ontology through the wiki CLI");
+    expect(prompt).toContain("Discover the current page type ontology through the tiangong-wiki CLI");
     expect(prompt).toContain("## Step 2 — Decide");
     expect(prompt).toContain("### Type Selection");
     expect(prompt).toContain("Do not default to any single type.");
@@ -39,7 +39,7 @@ describe("workflow prompt shape", () => {
     expect(prompt).toContain("At most 5 pages per vault source");
     expect(prompt).toContain("### Building Relations");
     expect(prompt).toContain("Do not inspect the whole workspace");
-    expect(prompt).toContain("Do not call wiki --help or perform broad discovery");
+    expect(prompt).toContain("Do not call tiangong-wiki --help or perform broad discovery");
     expect(prompt).toContain("**vaultPath**: MUST be relative to the vault root");
     expect(prompt).toContain("**relatedPages**: Populate with page IDs of related pages");
     expect(prompt).toContain("The system will normalize them to YYYY-MM-DD during indexing");
@@ -77,7 +77,7 @@ describe("workflow prompt shape", () => {
     const savedPrompt = readFile(artifacts.promptPath);
     expect(savedPrompt).toContain(`WORKSPACE_ROOT=${workspace.root}`);
     expect(savedPrompt).toContain("ALLOW_TEMPLATE_EVOLUTION=true");
-    expect(savedPrompt).toContain("wiki CLI provides these discovery and search capabilities");
+    expect(savedPrompt).toContain("tiangong-wiki CLI provides these discovery and search capabilities");
     expect(savedPrompt).toContain("Workspace-local skills are available from WORKSPACE_ROOT");
     expect(savedPrompt).toContain("The system will normalize them to YYYY-MM-DD during indexing");
     expect(savedPrompt).toContain("queue-item.json.threadId");

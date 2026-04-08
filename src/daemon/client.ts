@@ -89,7 +89,7 @@ async function probeEndpoint(endpoint: DaemonEndpoint): Promise<boolean> {
 
   return (
     payload.ok === true &&
-    payload.service === "wiki-daemon" &&
+    payload.service === "tiangong-wiki-daemon" &&
     payload.host === endpoint.host &&
     payload.port === endpoint.port &&
     (endpoint.pid === null || payload.pid === endpoint.pid)
@@ -199,7 +199,7 @@ function warnReadFallback(availability: DaemonAvailability): void {
     ? `${availability.state.host}:${availability.state.port}`
     : "unknown daemon endpoint";
   process.stderr.write(
-    `[wiki] daemon is running but unhealthy at ${location}; falling back to local read execution.\n`,
+    `[tiangong-wiki] daemon is running but unhealthy at ${location}; falling back to local read execution.\n`,
   );
 }
 

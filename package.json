@@ -1,22 +1,22 @@
 {
-  "name": "@biaoo/wiki",
+  "name": "@biaoo/tiangong-wiki",
   "version": "0.1.1",
-  "description": "Local-first wiki index and query engine for Markdown knowledge pages.",
+  "description": "Local-first wiki index and query engine for Markdown knowledge pages (Tiangong Wiki).",
   "type": "module",
   "publishConfig": {
     "access": "public"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/Biaoo/wiki.git"
+    "url": "https://github.com/Biaoo/tiangong-wiki.git"
   },
-  "homepage": "https://github.com/Biaoo/wiki#readme",
+  "homepage": "https://github.com/Biaoo/tiangong-wiki#readme",
   "bugs": {
-    "url": "https://github.com/Biaoo/wiki/issues"
+    "url": "https://github.com/Biaoo/tiangong-wiki/issues"
   },
   "license": "MIT",
   "bin": {
-    "wiki": "./dist/index.js"
+    "tiangong-wiki": "./dist/index.js"
   },
   "main": "./dist/index.js",
   "files": [

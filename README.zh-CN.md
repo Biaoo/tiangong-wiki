@@ -1,10 +1,10 @@
-# @biaoo/wiki
+# @biaoo/tiangong-wiki
 
 [English](./README.md)
 
 > 受 Karpathy 的 [LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) 启发 —— 不再像 RAG 那样每次从原始文档重新推导答案，而是让 LLM **构建并维护一个持久化的 wiki**，知识随使用不断积累。
 
-`@biaoo/wiki` 为这个模式提供基础设施：一个 CLI，将 Markdown 文件目录变为可查询的知识库，支持全文搜索、语义搜索、知识图谱和交互式仪表盘。
+`@biaoo/tiangong-wiki` 为这个模式提供基础设施：一个 CLI，将 Markdown 文件目录变为可查询的知识库，支持全文搜索、语义搜索、知识图谱和交互式仪表盘。
 
 ## 特性
 
@@ -21,7 +21,7 @@
 ## 安装
 
 ```bash
-npm install -g @biaoo/wiki
+npm install -g @biaoo/tiangong-wiki
 ```
 
 <details>
@@ -30,15 +30,15 @@ npm install -g @biaoo/wiki
 安装 npm 包后，将其注册到你的 Agent：
 
 ```bash
-npx skills add Biaoo/wiki -a codex          # Codex
-npx skills add Biaoo/wiki -a claude-code    # Claude Code
-npx skills add Biaoo/wiki -a codex -g       # 全局安装（跨项目可用）
+npx skills add Biaoo/tiangong-wiki -a codex          # Codex
+npx skills add Biaoo/tiangong-wiki -a claude-code    # Claude Code
+npx skills add Biaoo/tiangong-wiki -a codex -g       # 全局安装（跨项目可用）
 ```
 
 或使用配置向导一步完成：
 
 ```bash
-wiki setup
+tiangong-wiki setup
 ```
 
 </details>
@@ -46,25 +46,25 @@ wiki setup
 ## 快速开始
 
 ```bash
-wiki setup                                   # 交互式配置向导
-wiki doctor                                  # 验证配置
-wiki init                                    # 初始化工作区
-wiki sync                                    # 索引 Markdown 文件
+tiangong-wiki setup                                   # 交互式配置向导
+tiangong-wiki doctor                                  # 验证配置
+tiangong-wiki init                                    # 初始化工作区
+tiangong-wiki sync                                    # 索引 Markdown 文件
 ```
 
 ```bash
-wiki find --type concept --status active     # 结构化查询
-wiki fts "贝叶斯"                             # 全文搜索
-wiki search "优化算法的收敛条件"                # 语义搜索
-wiki graph bayes-theorem --depth 2           # 图遍历
+tiangong-wiki find --type concept --status active     # 结构化查询
+tiangong-wiki fts "贝叶斯"                             # 全文搜索
+tiangong-wiki search "优化算法的收敛条件"                # 语义搜索
+tiangong-wiki graph bayes-theorem --depth 2           # 图遍历
 ```
 
 ```bash
-wiki daemon run                              # 启动仪表盘和 HTTP API
-wiki dashboard                               # 在浏览器中打开仪表盘
+tiangong-wiki daemon run                              # 启动仪表盘和 HTTP API
+tiangong-wiki dashboard                               # 在浏览器中打开仪表盘
 ```
 
-> 环境变量通过 `.wiki.env` 管理（由 `wiki setup` 创建）。完整参考见 [references/env.md](./references/env.md)。
+> 环境变量通过 `.wiki.env` 管理（由 `tiangong-wiki setup` 创建）。完整参考见 [references/env.md](./references/env.md)。
 
 ## CLI
 
@@ -95,7 +95,7 @@ Vault        vault list | diff | queue
 │              Agentic Workflow（Codex SDK）                 │
 │                                                          │
 │  ┌─────────┐  解析    ┌────────────┐  发现体系  ┌─────┐  │
-│  │ Parser  │ ──────►  │ wiki-skill │ ────────► │ LLM │  │
+│  │ Parser  │ ──────►  │ tiangong-wiki-skill │ ────────► │ LLM │  │
 │  │ Skills  │  素材    │ find / fts │  + 决策   │     │  │
 │  └─────────┘          └────────────┘           └─────┘  │
 │  pdf · docx · pptx                                       │
@@ -108,7 +108,7 @@ Vault        vault list | diff | queue
 │               Markdown 页面（唯一真实来源）                  │
 │                    wiki/pages/**/*.md                     │
 └────────────────────────┬─────────────────────────────────┘
-                         │ wiki sync
+                         │ tiangong-wiki sync
                          ▼
 ┌──────────────────────────────────────────────────────────┐
 │                  SQLite 索引 (index.db)                    │
@@ -132,9 +132,9 @@ Vault        vault list | diff | queue
    CLI / 脚本              Web 仪表盘
 ```
 
-**Vault → Pages** — 原始素材进入 vault，Agentic Workflow 逐个阅读，通过 `wiki type list / find / fts` 发现当前知识体系，决定跳过、创建或更新页面。
+**Vault → Pages** — 原始素材进入 vault，Agentic Workflow 逐个阅读，通过 `tiangong-wiki type list / find / fts` 发现当前知识体系，决定跳过、创建或更新页面。
 
-**双引擎** — Markdown 文件是唯一真实来源，SQLite 是由 `wiki sync` 构建的衍生索引，提供纯文件无法实现的查询能力。
+**双引擎** — Markdown 文件是唯一真实来源，SQLite 是由 `tiangong-wiki sync` 构建的衍生索引，提供纯文件无法实现的查询能力。
 
 **灵活 Schema** — 三级列模型（固定列、部署列、模板列），配置变更时自动 `ALTER TABLE`，无需手动迁移。
 
@@ -153,8 +153,8 @@ Vault        vault list | diff | queue
 ## 开发
 
 ```bash
-git clone https://github.com/Biaoo/wiki.git
-cd wiki
+git clone https://github.com/Biaoo/tiangong-wiki.git
+cd tiangong-wiki
 npm install && npm run build
 
 npm run dev -- --help        # 从源码运行 CLI

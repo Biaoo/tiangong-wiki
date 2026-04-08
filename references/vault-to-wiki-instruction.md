@@ -30,17 +30,17 @@ Use the CLI as the source of truth for the current ontology and page set.
 
 Prefer:
 
-- `wiki type list --format json`
-- `wiki type show <type> --format json`
-- `wiki type recommend --text "<summary>" --keywords "a,b,c" --limit 5 --format json`
-- `wiki find`
-- `wiki fts`
-- `wiki page-info`
+- `tiangong-wiki type list --format json`
+- `tiangong-wiki type show <type> --format json`
+- `tiangong-wiki type recommend --text "<summary>" --keywords "a,b,c" --limit 5 --format json`
+- `tiangong-wiki find`
+- `tiangong-wiki fts`
+- `tiangong-wiki page-info`
 
 Notes:
 
-- Do not use guessed subcommands such as `wiki page find`.
-- `wiki find` and `wiki list` already emit JSON; do not append `--format json`.
+- Do not use guessed subcommands such as `tiangong-wiki page find`.
+- `tiangong-wiki find` and `tiangong-wiki list` already emit JSON; do not append `--format json`.
 
 Do not rely on static prompt snapshots of types, templates, or pages.
 
@@ -86,8 +86,8 @@ When applying changes:
 2. Create a new page only when the knowledge object is distinct and deserves its own identity.
 3. Keep edits minimal, specific, and provenance-preserving.
 4. For every changed page, run:
-   - `wiki sync --path <page>`
-   - `wiki lint --path <page> --format json`
+   - `tiangong-wiki sync --path <page>`
+   - `tiangong-wiki lint --path <page> --format json`
 
 ## Manifest Contract
 

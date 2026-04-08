@@ -1,10 +1,10 @@
-# @biaoo/wiki
+# @biaoo/tiangong-wiki
 
 [中文](./README.zh-CN.md)
 
 > Inspired by Karpathy's [LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) — instead of re-deriving answers from raw documents on every query (like RAG), the LLM **builds and maintains a persistent wiki** that compounds over time.
 
-`@biaoo/wiki` is the infrastructure for this pattern: a CLI that turns a directory of Markdown files into a queryable knowledge base with full-text search, semantic search, knowledge graph, and an interactive dashboard.
+`@biaoo/tiangong-wiki` is the infrastructure for this pattern: a CLI that turns a directory of Markdown files into a queryable knowledge base with full-text search, semantic search, knowledge graph, and an interactive dashboard.
 
 ## Features
 
@@ -21,7 +21,7 @@
 ## Install
 
 ```bash
-npm install -g @biaoo/wiki
+npm install -g @biaoo/tiangong-wiki
 ```
 
 <details>
@@ -30,15 +30,15 @@ npm install -g @biaoo/wiki
 After installing the npm package, register it with your agent:
 
 ```bash
-npx skills add Biaoo/wiki -a codex          # Codex
-npx skills add Biaoo/wiki -a claude-code    # Claude Code
-npx skills add Biaoo/wiki -a codex -g       # Global (cross-project)
+npx skills add Biaoo/tiangong-wiki -a codex          # Codex
+npx skills add Biaoo/tiangong-wiki -a claude-code    # Claude Code
+npx skills add Biaoo/tiangong-wiki -a codex -g       # Global (cross-project)
 ```
 
 Or let the setup wizard handle everything:
 
 ```bash
-wiki setup
+tiangong-wiki setup
 ```
 
 </details>
@@ -46,25 +46,25 @@ wiki setup
 ## Quick Start
 
 ```bash
-wiki setup                                   # interactive config wizard
-wiki doctor                                  # verify configuration
-wiki init                                    # initialize workspace
-wiki sync                                    # index Markdown pages
+tiangong-wiki setup                                   # interactive config wizard
+tiangong-wiki doctor                                  # verify configuration
+tiangong-wiki init                                    # initialize workspace
+tiangong-wiki sync                                    # index Markdown pages
 ```
 
 ```bash
-wiki find --type concept --status active     # structured query
-wiki fts "Bayesian"                          # full-text search
-wiki search "convergence conditions"         # semantic search
-wiki graph bayes-theorem --depth 2           # graph traversal
+tiangong-wiki find --type concept --status active     # structured query
+tiangong-wiki fts "Bayesian"                          # full-text search
+tiangong-wiki search "convergence conditions"         # semantic search
+tiangong-wiki graph bayes-theorem --depth 2           # graph traversal
 ```
 
 ```bash
-wiki daemon run                              # start dashboard & HTTP API
-wiki dashboard                               # open dashboard in browser
+tiangong-wiki daemon run                              # start dashboard & HTTP API
+tiangong-wiki dashboard                               # open dashboard in browser
 ```
 
-> Environment variables are managed via `.wiki.env` (created by `wiki setup`). See [references/env.md](./references/env.md) for the full reference.
+> Environment variables are managed via `.wiki.env` (created by `tiangong-wiki setup`). See [references/env.md](./references/env.md) for the full reference.
 
 ## CLI
 
@@ -95,7 +95,7 @@ See [references/cli-interface.md](./references/cli-interface.md) for the full co
 │              Agentic Workflow (Codex SDK)                 │
 │                                                          │
 │  ┌─────────┐  read    ┌────────────┐  discover  ┌─────┐ │
-│  │ Parser  │ ──────►  │ wiki-skill │ ────────►  │ LLM │ │
+│  │ Parser  │ ──────►  │ tiangong-wiki-skill │ ────────►  │ LLM │ │
 │  │ Skills  │  source  │ find / fts │  + decide  │     │ │
 │  └─────────┘          └────────────┘            └─────┘ │
 │  pdf · docx · pptx                                       │
@@ -108,7 +108,7 @@ See [references/cli-interface.md](./references/cli-interface.md) for the full co
 │                    Markdown Pages (SSOT)                  │
 │                    wiki/pages/**/*.md                     │
 └────────────────────────┬─────────────────────────────────┘
-                         │ wiki sync
+                         │ tiangong-wiki sync
                          ▼
 ┌──────────────────────────────────────────────────────────┐
 │                   SQLite Index (index.db)                 │
@@ -132,9 +132,9 @@ See [references/cli-interface.md](./references/cli-interface.md) for the full co
    CLI / Scripts            Web Dashboard
 ```
 
-**Vault → Pages** — Raw materials land in the vault. An agentic workflow reads each file, discovers the current ontology via `wiki type list / find / fts`, and decides whether to skip, create, or update a page.
+**Vault → Pages** — Raw materials land in the vault. An agentic workflow reads each file, discovers the current ontology via `tiangong-wiki type list / find / fts`, and decides whether to skip, create, or update a page.
 
-**Dual engine** — Markdown files are the source of truth. SQLite is a derived index rebuilt by `wiki sync`, enabling queries that plain files cannot support.
+**Dual engine** — Markdown files are the source of truth. SQLite is a derived index rebuilt by `tiangong-wiki sync`, enabling queries that plain files cannot support.
 
 **Flexible schema** — Three-tier column model (fixed, deploy-level, template-level) with automatic `ALTER TABLE` on config changes.
 
@@ -153,8 +153,8 @@ See [references/cli-interface.md](./references/cli-interface.md) for the full co
 ## Development
 
 ```bash
-git clone https://github.com/Biaoo/wiki.git
-cd wiki
+git clone https://github.com/Biaoo/tiangong-wiki.git
+cd tiangong-wiki
 npm install && npm run build
 
 npm run dev -- --help        # CLI from source

@@ -95,7 +95,7 @@ describe("setup and doctor integration", () => {
       input: answers,
     });
     expect(setup.status).toBe(0);
-    expect(setup.stdout).toContain("wiki setup complete");
+    expect(setup.stdout).toContain("tiangong-wiki setup complete");
 
     const envFilePath = `${workspace.root}/.wiki.env`;
     const envFile = readFile(envFilePath);
@@ -103,8 +103,8 @@ describe("setup and doctor integration", () => {
     expect(envFile).toContain("VAULT_PATH=");
     expect(envFile).toContain("WIKI_AGENT_ENABLED=false");
     expect(envFile).toContain("WIKI_PARSER_SKILLS=pdf");
-    expect(readFile(path.join(workspace.root, ".agents", "skills", "wiki-skill", "SKILL.md"))).toContain(
-      "name: wiki-skill",
+    expect(readFile(path.join(workspace.root, ".agents", "skills", "tiangong-wiki-skill", "SKILL.md"))).toContain(
+      "name: tiangong-wiki-skill",
     );
     expect(readFile(path.join(workspace.root, ".agents", "skills", "pdf", "SKILL.md"))).toContain("name: pdf");
 
@@ -124,7 +124,7 @@ describe("setup and doctor integration", () => {
       expect.arrayContaining([
         expect.objectContaining({ id: "env-file", severity: "ok" }),
         expect.objectContaining({ id: "config", severity: "ok" }),
-        expect.objectContaining({ id: "wiki-skill", severity: "ok" }),
+        expect.objectContaining({ id: "tiangong-wiki-skill", severity: "ok" }),
         expect.objectContaining({ id: "parser-skills", severity: "ok" }),
       ]),
     );
@@ -180,7 +180,7 @@ describe("setup and doctor integration", () => {
       input: answers,
     });
     expect(setup.status).toBe(0);
-    expect(setup.stdout).toContain("wiki setup complete");
+    expect(setup.stdout).toContain("tiangong-wiki setup complete");
 
     const envFilePath = `${workspace.root}/.wiki.env`;
     const envFile = readFile(envFilePath);
@@ -241,17 +241,17 @@ describe("setup and doctor integration", () => {
     }>(doctor.stdout);
     expect(report.ok).toBe(false);
     expect(report.skills.requestedParserSkills).toEqual(["pdf", "docx"]);
-    expect(report.skills.missingSkills).toEqual(expect.arrayContaining(["wiki-skill", "pdf", "docx"]));
+    expect(report.skills.missingSkills).toEqual(expect.arrayContaining(["tiangong-wiki-skill", "pdf", "docx"]));
     expect(report.checks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: "config", severity: "error" }),
         expect.objectContaining({ id: "templates-path", severity: "error" }),
         expect.objectContaining({ id: "skills-root", severity: "error" }),
-        expect.objectContaining({ id: "wiki-skill", severity: "error" }),
+        expect.objectContaining({ id: "tiangong-wiki-skill", severity: "error" }),
         expect.objectContaining({ id: "parser-skills", severity: "error" }),
       ]),
     );
-    expect(report.recommendations.join("\n")).toContain("wiki setup");
+    expect(report.recommendations.join("\n")).toContain("tiangong-wiki setup");
   });
 
   it("reports invalid parser skill declarations precisely", () => {

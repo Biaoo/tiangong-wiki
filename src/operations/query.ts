@@ -853,7 +853,7 @@ export function renderLintResult(result: {
   info: LintItem[];
   summary: { pages: number; errors: number; warnings: number; info: number };
 }): string {
-  const lines = [`wiki lint: ${result.summary.pages} pages checked`, ""];
+  const lines = [`tiangong-wiki lint: ${result.summary.pages} pages checked`, ""];
   const sections: Array<{ label: string; items: LintItem[] }> = [
     { label: "ERROR", items: result.errors },
     { label: "WARN", items: result.warnings },

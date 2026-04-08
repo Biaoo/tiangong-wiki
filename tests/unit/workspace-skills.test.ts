@@ -26,7 +26,7 @@ describe("workspace skills", () => {
     expect(() => parseParserSkills("pdf,unknown")).toThrow(/unsupported skills/i);
   });
 
-  it("creates a workspace-local wiki-skill symlink", () => {
+  it("creates a workspace-local tiangong-wiki-skill symlink", () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "wiki-workspace-skills-"));
     tempDirs.push(root);
 
@@ -34,7 +34,7 @@ describe("workspace skills", () => {
     const packageRoot = path.join(root, "package");
     mkdirSync(wikiPath, { recursive: true });
     mkdirSync(packageRoot, { recursive: true });
-    writeFileSync(path.join(packageRoot, "SKILL.md"), "---\nname: wiki-skill\ndescription: test\n---\n", "utf8");
+    writeFileSync(path.join(packageRoot, "SKILL.md"), "---\nname: tiangong-wiki-skill\ndescription: test\n---\n", "utf8");
 
     const installed = ensureWikiSkillInstall(wikiPath, packageRoot);
     const paths = resolveWorkspaceSkillPaths(wikiPath);
@@ -43,18 +43,18 @@ describe("workspace skills", () => {
     expect(installed.status).toBe("linked");
   });
 
-  it("replaces an existing copied wiki-skill directory with a symlink", () => {
+  it("replaces an existing copied tiangong-wiki-skill directory with a symlink", () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "wiki-workspace-skills-"));
     tempDirs.push(root);
 
     const wikiPath = path.join(root, "wiki", "pages");
     const packageRoot = path.join(root, "package");
-    const copiedSkillPath = path.join(root, ".agents", "skills", "wiki-skill");
+    const copiedSkillPath = path.join(root, ".agents", "skills", "tiangong-wiki-skill");
     mkdirSync(wikiPath, { recursive: true });
     mkdirSync(packageRoot, { recursive: true });
     mkdirSync(copiedSkillPath, { recursive: true });
-    writeFileSync(path.join(packageRoot, "SKILL.md"), "---\nname: wiki-skill\ndescription: package\n---\n", "utf8");
-    writeFileSync(path.join(copiedSkillPath, "SKILL.md"), "---\nname: wiki-skill\ndescription: copied\n---\n", "utf8");
+    writeFileSync(path.join(packageRoot, "SKILL.md"), "---\nname: tiangong-wiki-skill\ndescription: package\n---\n", "utf8");
+    writeFileSync(path.join(copiedSkillPath, "SKILL.md"), "---\nname: tiangong-wiki-skill\ndescription: copied\n---\n", "utf8");
 
     const installed = ensureWikiSkillInstall(wikiPath, packageRoot);
 

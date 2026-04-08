@@ -92,7 +92,7 @@ describe("workflow artifacts", () => {
     );
     chmodSync(fakeNodePath, 0o755);
 
-    const wrapperPath = path.join(artifacts.skillArtifactsPath, "wiki");
+    const wrapperPath = path.join(artifacts.skillArtifactsPath, "tiangong-wiki");
     const result = spawnSync(wrapperPath, ["sync", "--path", "concepts/bayes-theorem.md"], {
       encoding: "utf8",
       env: {

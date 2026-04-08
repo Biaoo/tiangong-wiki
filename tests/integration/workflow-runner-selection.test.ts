@@ -59,7 +59,7 @@ describe("workflow runner selection", () => {
           decision: "apply",
           reason: "Captured the durable spec.",
           threadId,
-          skillsUsed: ["wiki-skill", "pdf"],
+          skillsUsed: ["tiangong-wiki-skill", "pdf"],
           createdPageIds: ["concepts/spec.md"],
           updatedPageIds: [],
           appliedTypeNames: ["concept"],
@@ -88,7 +88,7 @@ describe("workflow runner selection", () => {
         decision: "skip",
         reason: "The file is too noisy.",
         threadId,
-        skillsUsed: ["wiki-skill"],
+        skillsUsed: ["tiangong-wiki-skill"],
         createdPageIds: [],
         updatedPageIds: [],
         appliedTypeNames: [],
@@ -167,7 +167,7 @@ describe("workflow runner selection", () => {
         decision: "apply",
         reason: "Captured the durable spec.",
         threadId,
-        skillsUsed: ["wiki-skill", "pdf"],
+        skillsUsed: ["tiangong-wiki-skill", "pdf"],
         createdPageIds: ["concepts/spec.md"],
         updatedPageIds: [],
         appliedTypeNames: ["concept"],
@@ -191,7 +191,7 @@ describe("workflow runner selection", () => {
     expect(observedInputs[0]?.workspaceRoot).toBe(workspace.root);
     expect(observedInputs[0]?.promptText).toContain("Workspace-local skills are available from WORKSPACE_ROOT");
     expect(observedInputs[0]?.promptText).not.toContain("SKILL_PACKAGE_ROOT=");
-    expect(existsSync(path.join(workspace.root, ".agents", "skills", "wiki-skill", "SKILL.md"))).toBe(true);
+    expect(existsSync(path.join(workspace.root, ".agents", "skills", "tiangong-wiki-skill", "SKILL.md"))).toBe(true);
     expect(existsSync(path.join(workspace.root, ".agents", "skills", "pdf", "SKILL.md"))).toBe(true);
   });
 
@@ -226,7 +226,7 @@ describe("workflow runner selection", () => {
         decision: "apply",
         reason: "Resumed and completed.",
         threadId,
-        skillsUsed: ["wiki-skill"],
+        skillsUsed: ["tiangong-wiki-skill"],
         createdPageIds: [],
         updatedPageIds: ["methods/resume.md"],
         appliedTypeNames: ["method"],
@@ -320,7 +320,7 @@ describe("workflow runner selection", () => {
               decision: "apply",
               reason: "Recovered the already-written result manifest.",
               threadId: "salvaged-thread",
-              skillsUsed: ["wiki-skill"],
+              skillsUsed: ["tiangong-wiki-skill"],
               createdPageIds: ["methods/salvaged.md"],
               updatedPageIds: [],
               appliedTypeNames: ["method"],
@@ -423,7 +423,7 @@ describe("workflow runner selection", () => {
           decision: "apply",
           reason: "Recovered on inline retry.",
           threadId: handle.threadId,
-          skillsUsed: ["wiki-skill"],
+          skillsUsed: ["tiangong-wiki-skill"],
           createdPageIds: ["methods/recoverable.md"],
           updatedPageIds: [],
           appliedTypeNames: ["method"],

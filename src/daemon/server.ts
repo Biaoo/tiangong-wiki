@@ -587,7 +587,7 @@ export async function runDaemonServer(options: {
       if (method === "GET" && pathname === "/health") {
         writeJsonResponse(response, 200, {
           ok: true,
-          service: "wiki-daemon",
+          service: "tiangong-wiki-daemon",
           pid: state?.pid ?? process.pid,
           host: state?.host ?? paths.daemonHost,
           port: state?.port ?? null,

@@ -123,7 +123,7 @@ async function waitForHealthyDaemon(expectedPid: number, env: NodeJS.ProcessEnv 
 
 function renderStatusText(payload: StatusPayload): string {
   return [
-    "wiki daemon status",
+    "tiangong-wiki daemon status",
     `running: ${payload.running}`,
     `pid: ${payload.pid ?? ""}`,
     `host: ${payload.host ?? ""}`,

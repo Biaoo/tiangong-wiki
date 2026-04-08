@@ -62,8 +62,8 @@ function nodeExecPath(): string {
 }
 
 export function createWorkspace(extraEnv: NodeJS.ProcessEnv = {}): Workspace {
-  const root = mkdtempSync(path.join(os.tmpdir(), "wiki-skill-"));
-  const wikiRoot = path.join(root, "wiki");
+  const root = mkdtempSync(path.join(os.tmpdir(), "tiangong-wiki-test-"));
+  const wikiRoot = path.join(root, "tiangong-wiki");
   const wikiPath = path.join(wikiRoot, "pages");
   const vaultPath = path.join(root, "vault");
   mkdirSync(wikiPath, { recursive: true });

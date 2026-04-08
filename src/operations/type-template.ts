@@ -148,7 +148,7 @@ export async function recommendTypes(
       db.prepare("SELECT COUNT(*) AS count FROM vec_pages").get() as { count: number }
     ).count;
     if (hasVectors === 0) {
-      throw new AppError("No page embeddings found. Run wiki sync with embedding enabled first.", "not_configured");
+      throw new AppError("No page embeddings found. Run tiangong-wiki sync with embedding enabled first.", "not_configured");
     }
 
     const rows = db

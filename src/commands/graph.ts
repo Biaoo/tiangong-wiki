@@ -7,7 +7,7 @@ import { writeJson } from "../utils/output.js";
 export function registerGraphCommand(program: Command): void {
   program
     .command("graph")
-    .description("Traverse the wiki graph with recursive CTEs")
+    .description("Traverse the tiangong-wiki graph with recursive CTEs")
     .argument("<root>", "Root nodeId or page id")
     .option("--depth <number>", "Traversal depth", "1")
     .option("--edge-type <edgeType>", "Optional edge type filter")

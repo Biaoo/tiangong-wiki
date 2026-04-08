@@ -1,5 +1,5 @@
 ---
-name: wiki-skill
+name: tiangong-wiki-skill
 description: "Local-first wiki query and page-maintenance interface over Markdown knowledge pages indexed into SQLite. Use when an agent should discover existing knowledge before answering, inspect vault changes or queue state, choose how new durable knowledge fits the current ontology, or create/update wiki pages in a local knowledge workspace."
 ---
 
@@ -11,7 +11,7 @@ description: "Local-first wiki query and page-maintenance interface over Markdow
 - Treat page types as runtime-discovered ontology. Do not hardcode a default destination for new knowledge.
 
 ## Use When
-Use `wiki-skill` when:
+Use `tiangong-wiki-skill` when:
 - You should check whether the answer already exists in the local wiki before writing a fresh answer.
 - You need to inspect the current ontology, template structure, or type recommendations before creating a page.
 - A durable insight, correction, workflow, lesson, or source-derived knowledge should be preserved for reuse.
@@ -20,55 +20,55 @@ Use `wiki-skill` when:
 - You need to create or update a page and immediately re-index it.
 
 ## Retrieval Strategy
-- Exact metadata, type, tag, status, node id, or dynamic column filter: `wiki find`
-- Keyword or short literal clue: `wiki fts`
-- Fuzzy natural-language retrieval with embeddings configured: `wiki search`
-- Graph neighborhood, prerequisites, or multi-hop relations: `wiki graph`
-- Single-page metadata, edges, provenance, or file path: `wiki page-info`
-- Workspace inventory or health: `wiki list`, `wiki stat`, `wiki lint`
-- Ontology discovery: `wiki type list`, `wiki type show`, `wiki type recommend`
-- Vault ingestion status: `wiki vault diff`, `wiki vault list`, `wiki vault queue`
+- Exact metadata, type, tag, status, node id, or dynamic column filter: `tiangong-wiki find`
+- Keyword or short literal clue: `tiangong-wiki fts`
+- Fuzzy natural-language retrieval with embeddings configured: `tiangong-wiki search`
+- Graph neighborhood, prerequisites, or multi-hop relations: `tiangong-wiki graph`
+- Single-page metadata, edges, provenance, or file path: `tiangong-wiki page-info`
+- Workspace inventory or health: `tiangong-wiki list`, `tiangong-wiki stat`, `tiangong-wiki lint`
+- Ontology discovery: `tiangong-wiki type list`, `tiangong-wiki type show`, `tiangong-wiki type recommend`
+- Vault ingestion status: `tiangong-wiki vault diff`, `tiangong-wiki vault list`, `tiangong-wiki vault queue`
 
 ## Knowledge Capture Workflow
 Use this when new knowledge should become part of the wiki.
 
-1. Query for close existing pages with `wiki find`, `wiki fts`, or `wiki search`.
+1. Query for close existing pages with `tiangong-wiki find`, `tiangong-wiki fts`, or `tiangong-wiki search`.
 2. Discover the current ontology with:
-   - `wiki type list --format json`
-   - `wiki type show <type> --format json`
-   - `wiki type recommend --text "<summary>" --keywords "a,b,c" --format json`
+   - `tiangong-wiki type list --format json`
+   - `tiangong-wiki type show <type> --format json`
+   - `tiangong-wiki type recommend --text "<summary>" --keywords "a,b,c" --format json`
 3. Update the best existing page when the knowledge object already exists.
 4. Create a new page only when the knowledge object is distinct and the current ontology supports it cleanly.
 5. Edit the Markdown file directly.
-6. Run `wiki sync --path <page-id>`.
-7. Run `wiki lint --path <page-id> --format json`.
+6. Run `tiangong-wiki sync --path <page-id>`.
+7. Run `tiangong-wiki lint --path <page-id> --format json`.
 
 ```bash
-wiki find --type method --tag evidence
-wiki type list --format json
-wiki type recommend --text "A repeatable workflow for evidence review" --keywords "workflow,procedure" --limit 5 --format json
-wiki create --type method --title "Evidence Review Workflow"
-wiki sync --path methods/evidence-review-workflow.md
-wiki lint --path methods/evidence-review-workflow.md --format json
+tiangong-wiki find --type method --tag evidence
+tiangong-wiki type list --format json
+tiangong-wiki type recommend --text "A repeatable workflow for evidence review" --keywords "workflow,procedure" --limit 5 --format json
+tiangong-wiki create --type method --title "Evidence Review Workflow"
+tiangong-wiki sync --path methods/evidence-review-workflow.md
+tiangong-wiki lint --path methods/evidence-review-workflow.md --format json
 ```
 
 ## Vault Review Workflow
 Use this when `vault/` may contain source files that should influence wiki knowledge.
 
-1. Run `wiki sync` to refresh indexes, vault metadata, and queue state.
-2. Inspect recent vault changes with `wiki vault diff`.
-3. Inspect queue state with `wiki vault queue`.
-4. Discover the ontology through `wiki type list/show/recommend` before deciding what to create or update.
+1. Run `tiangong-wiki sync` to refresh indexes, vault metadata, and queue state.
+2. Inspect recent vault changes with `tiangong-wiki vault diff`.
+3. Inspect queue state with `tiangong-wiki vault queue`.
+4. Discover the ontology through `tiangong-wiki type list/show/recommend` before deciding what to create or update.
 5. Preserve provenance with `sourceRefs` and any source-specific fields required by the chosen page type.
 6. Remember that `source-summary` is only one possible type. A vault file may lead to `skip`, an update to an existing page, a new page of any registered type, or a proposal to evolve the ontology.
 
 ```bash
-wiki sync
-wiki vault diff
-wiki vault queue
-wiki type list --format json
-wiki type recommend --text "Operational brief about evidence review" --keywords "operations,evidence" --limit 5 --format json
-wiki find --type method --tag evidence
+tiangong-wiki sync
+tiangong-wiki vault diff
+tiangong-wiki vault queue
+tiangong-wiki type list --format json
+tiangong-wiki type recommend --text "Operational brief about evidence review" --keywords "operations,evidence" --limit 5 --format json
+tiangong-wiki find --type method --tag evidence
 ```
 
 ## Maintenance Rules

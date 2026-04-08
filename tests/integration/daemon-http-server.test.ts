@@ -269,7 +269,7 @@ describe("daemon HTTP server integration", () => {
     expect(health.status).toBe(200);
     expect(health.payload).toEqual({
       ok: true,
-      service: "wiki-daemon",
+      service: "tiangong-wiki-daemon",
       pid: state.pid,
       host: "127.0.0.1",
       port: state.port,
@@ -366,7 +366,7 @@ describe("daemon HTTP server integration", () => {
     expect(state.launchMode).toBe("start");
   });
 
-  it("starts the daemon from `wiki dashboard` and serves the dashboard shell", async () => {
+  it("starts the daemon from `tiangong-wiki dashboard` and serves the dashboard shell", async () => {
     const workspace = createWorkspace({
       WIKI_SYNC_INTERVAL: "0",
     });
@@ -392,7 +392,7 @@ describe("daemon HTTP server integration", () => {
 
     const response = await fetch(payload.url);
     expect(response.ok).toBe(true);
-    expect(await response.text()).toContain("Wiki Intelligence");
+    expect(await response.text()).toContain("Tiangong Wiki");
   });
 
   it("falls back to local reads when the daemon is degraded and refuses write commands", async () => {

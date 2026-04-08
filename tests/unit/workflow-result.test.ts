@@ -8,7 +8,7 @@ function validManifest() {
     decision: "apply",
     reason: "The file adds durable knowledge.",
     threadId: "thread-123",
-    skillsUsed: ["wiki-skill", "pdf-reader"],
+    skillsUsed: ["tiangong-wiki-skill", "pdf-reader"],
     createdPageIds: ["concepts/bayes-updating.md"],
     updatedPageIds: ["methods/evidence-review.md"],
     appliedTypeNames: ["concept", "method"],

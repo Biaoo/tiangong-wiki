@@ -65,10 +65,10 @@ function createCodexClient(input: CodexWorkflowInput): Codex {
     // The SDK's `baseUrl` option maps to `openai_base_url` which gets overridden by
     // model_provider; using `config` directly avoids this precedence issue.
     options.config = {
-      model_provider: "wiki-agent",
+      model_provider: "tiangong-wiki-agent",
       model_providers: {
-        "wiki-agent": {
-          name: "wiki-agent",
+        "tiangong-wiki-agent": {
+          name: "tiangong-wiki-agent",
           base_url: baseUrl,
           wire_api: "responses",
           experimental_bearer_token: apiKey || "",
@@ -278,7 +278,7 @@ function createSkipOnlyTestWorkflowRunner(options: { delayMs?: number; mode: str
       decision: "skip",
       reason: `Skipped by WIKI_TEST_FAKE_WORKFLOW_MODE=${options.mode}.`,
       threadId,
-      skillsUsed: ["wiki-skill"],
+      skillsUsed: ["tiangong-wiki-skill"],
       createdPageIds: [],
       updatedPageIds: [],
       appliedTypeNames: [],

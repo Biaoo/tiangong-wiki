@@ -52,7 +52,7 @@ export class EmbeddingClient {
   }
 
   async probe(): Promise<void> {
-    await this.embedBatch(["wiki-skill probe"]);
+    await this.embedBatch(["tiangong-wiki-skill probe"]);
   }
 
   async embedBatch(inputs: string[]): Promise<number[][]> {

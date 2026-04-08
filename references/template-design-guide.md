@@ -90,8 +90,8 @@ sourceRefs, relatedPages, tags, createdAt, updatedAt
 
 | 问题 | 放在 | 原因 |
 | --- | --- | --- |
-| 需要 `wiki find --<field>` 过滤？ | `columns` | 建 SQLite 索引列，支持结构化查询 |
-| 需要出现在 `wiki search` / `wiki fts` 的摘要中？ | `summaryFields` | 纳入 summary_text 用于检索 |
+| 需要 `tiangong-wiki find --<field>` 过滤？ | `columns` | 建 SQLite 索引列，支持结构化查询 |
+| 需要出现在 `tiangong-wiki search` / `tiangong-wiki fts` 的摘要中？ | `summaryFields` | 纳入 summary_text 用于检索 |
 | 需要生成 edge（关联到其他页面/节点）？ | `edges` | 写入 edges 表，支持 graph 遍历 |
 | 只是页面内的补充信息？ | 仅写在 frontmatter | 存入 `pages.extra` JSON，不建列 |
 
@@ -99,7 +99,7 @@ sourceRefs, relatedPages, tags, createdAt, updatedAt
 
 ## 4. Columns 设计
 
-`columns` 中的字段会在 `pages` 表上建列和索引，支持 `wiki find` 的结构化过滤。
+`columns` 中的字段会在 `pages` 表上建列和索引，支持 `tiangong-wiki find` 的结构化过滤。
 
 ```json
 "columns": {
@@ -250,7 +250,7 @@ decisions: []
 **设计决策说明**：
 
 - `meetingDate` 建列 — 需要按日期过滤查找
-- `participants` 不建列 — 查参会人用 `wiki fts` 搜索 summary_text 即可
+- `participants` 不建列 — 查参会人用 `tiangong-wiki fts` 搜索 summary_text 即可
 - `participants` 和 `decisions` 放入 summaryFields — 帮助搜索命中
 - `decisions` 不建 edge — 决议是文本，不是指向其他页面的引用
 - Body 4 个 section — 背景 → 讨论 → 决议 → 待办，逻辑递进
@@ -263,9 +263,9 @@ decisions: []
 
 - [ ] 新 type 的结构是否与所有现有 type 都有本质差异？
 - [ ] 每个 frontmatter 字段都有明确的查询或分类用途？
-- [ ] 需要 `wiki find` 过滤的字段都放进了 `columns`？
+- [ ] 需要 `tiangong-wiki find` 过滤的字段都放进了 `columns`？
 - [ ] 生成 graph 边的数组字段都定义了 `edges`？
 - [ ] `summaryFields` 包含了有助于检索的关键字段？
 - [ ] Body section 数量在 3-6 个之间，有逻辑递进？
 - [ ] Section 提示语具体而非泛泛？
-- [ ] 通过 `wiki template create --type <type> --title <title>` 创建后，可以 `wiki sync` + `wiki lint` 无 error？
+- [ ] 通过 `tiangong-wiki template create --type <type> --title <title>` 创建后，可以 `tiangong-wiki sync` + `tiangong-wiki lint` 无 error？

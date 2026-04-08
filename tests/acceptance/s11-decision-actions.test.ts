@@ -122,7 +122,7 @@ describe("acceptance: decision + actions workflow", () => {
         decision: "apply",
         reason: "Updated the existing method and created a connected lesson page.",
         threadId,
-        skillsUsed: ["wiki-skill"],
+        skillsUsed: ["tiangong-wiki-skill"],
         createdPageIds: [lessonPage.pageId],
         updatedPageIds: [methodPage.pageId],
         appliedTypeNames: ["method", "lesson"],

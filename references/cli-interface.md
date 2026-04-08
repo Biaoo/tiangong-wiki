@@ -4,10 +4,10 @@ All commands are invoked through a single entry point:
 
 ```bash
 # Global install
-wiki <command> [options]
+tiangong-wiki <command> [options]
 
 # npx
-npx @biaoo/wiki <command> [options]
+npx @biaoo/tiangong-wiki <command> [options]
 
 # Development
 npm run dev -- <command> [options]
@@ -48,7 +48,7 @@ npm run dev -- <command> [options]
 ### setup
 
 ```
-wiki setup
+tiangong-wiki setup
 ```
 
 Interactive step-by-step wizard that:
@@ -58,12 +58,12 @@ Interactive step-by-step wizard that:
 - Writes `.wiki.env` in the current working directory
 - Scaffolds `wiki/pages/`, `vault/`, `wiki.config.json`, and `templates/`
 
-After setup, run `wiki doctor` then `wiki init` to complete initialization.
+After setup, run `tiangong-wiki doctor` then `tiangong-wiki init` to complete initialization.
 
 ### doctor
 
 ```
-wiki doctor [--probe] [--format text|json]
+tiangong-wiki doctor [--probe] [--format text|json]
 ```
 
 | Option | Description |
@@ -76,7 +76,7 @@ Checks: `.wiki.env` loading, path existence, database accessibility, config vali
 ### init
 
 ```
-wiki init [--force]
+tiangong-wiki init [--force]
 ```
 
 | Option | Description |
@@ -88,7 +88,7 @@ Creates `index.db` (if needed), builds tables according to `wiki.config.json` (i
 ### sync
 
 ```
-wiki sync [options]
+tiangong-wiki sync [options]
 ```
 
 | Option | Description |
@@ -104,7 +104,7 @@ When `--path` is used, vault scanning is skipped. If a global config or embeddin
 ### check-config
 
 ```
-wiki check-config [--probe] [--format text|json]
+tiangong-wiki check-config [--probe] [--format text|json]
 ```
 
 Validates environment variables, `wiki.config.json`, and template files. With `--probe`, also tests embedding API connectivity.
@@ -112,7 +112,7 @@ Validates environment variables, `wiki.config.json`, and template files. With `-
 ### find
 
 ```
-wiki find [options]
+tiangong-wiki find [options]
 ```
 
 | Option | Description |
@@ -133,7 +133,7 @@ Output: JSON array to stdout.
 ### search
 
 ```
-wiki search <query> [--type <pageType>] [--limit <n>]
+tiangong-wiki search <query> [--type <pageType>] [--limit <n>]
 ```
 
 Semantic similarity search. The query is embedded via the configured embedding API and matched against `vec_pages`. Requires `EMBEDDING_*` environment variables.
@@ -143,7 +143,7 @@ Output: JSON array with `similarity` scores.
 ### fts
 
 ```
-wiki fts <query> [--type <pageType>] [--limit <n>]
+tiangong-wiki fts <query> [--type <pageType>] [--limit <n>]
 ```
 
 Full-text search against the `pages_fts` table (title, tags, summary_text). Default limit: 20.
@@ -151,7 +151,7 @@ Full-text search against the `pages_fts` table (title, tags, summary_text). Defa
 ### graph
 
 ```
-wiki graph <root> [options]
+tiangong-wiki graph <root> [options]
 ```
 
 | Option | Description |
@@ -165,7 +165,7 @@ Returns `{ root, nodes[], edges[] }` as JSON.
 ### page-info
 
 ```
-wiki page-info <pageId>
+tiangong-wiki page-info <pageId>
 ```
 
 Returns full indexed metadata for one page: all frontmatter fields, incoming/outgoing edges, embedding status, and content hash.
@@ -173,7 +173,7 @@ Returns full indexed metadata for one page: all frontmatter fields, incoming/out
 ### list
 
 ```
-wiki list [--type <pageType>] [--sort <column>] [--limit <n>]
+tiangong-wiki list [--type <pageType>] [--sort <column>] [--limit <n>]
 ```
 
 Compact listing with title, pageType, status, updatedAt, and filePath. Default sort: `updatedAt`, default limit: 50.
@@ -181,7 +181,7 @@ Compact listing with title, pageType, status, updatedAt, and filePath. Default s
 ### stat
 
 ```
-wiki stat
+tiangong-wiki stat
 ```
 
 Aggregate statistics: total pages, breakdown by type/status, total edges, orphan count, embedding status, vault file count, last sync time, and registered template count.
@@ -189,7 +189,7 @@ Aggregate statistics: total pages, breakdown by type/status, total edges, orphan
 ### create
 
 ```
-wiki create --type <pageType> --title <title> [--node-id <nodeId>]
+tiangong-wiki create --type <pageType> --title <title> [--node-id <nodeId>]
 ```
 
 Creates a page from the corresponding template in `wiki/templates/`, fills frontmatter fields (title, createdAt, updatedAt, etc.), writes to `wiki/pages/`, and immediately indexes it.
@@ -199,9 +199,9 @@ Output: `{ created, filePath }`.
 ### template
 
 ```
-wiki template list [--format text|json]
-wiki template show <pageType> [--format text|json]
-wiki template create --type <pageType> --title <title>
+tiangong-wiki template list [--format text|json]
+tiangong-wiki template show <pageType> [--format text|json]
+tiangong-wiki template create --type <pageType> --title <title>
 ```
 
 - `list` — Show registered templates
@@ -211,9 +211,9 @@ wiki template create --type <pageType> --title <title>
 ### type
 
 ```
-wiki type list [--format text|json]
-wiki type show <pageType> [--format text|json]
-wiki type recommend [--text <text>] [--keywords <kw>] [--limit <n>] [--format text|json]
+tiangong-wiki type list [--format text|json]
+tiangong-wiki type show <pageType> [--format text|json]
+tiangong-wiki type recommend [--text <text>] [--keywords <kw>] [--limit <n>] [--format text|json]
 ```
 
 - `list` — List all registered page types with their columns, edges, and summary fields
@@ -223,9 +223,9 @@ wiki type recommend [--text <text>] [--keywords <kw>] [--limit <n>] [--format te
 ### vault
 
 ```
-wiki vault list [--path <prefix>] [--ext <ext>]
-wiki vault diff [--since <date>] [--path <prefix>]
-wiki vault queue [--status pending|processing|done|skipped|error]
+tiangong-wiki vault list [--path <prefix>] [--ext <ext>]
+tiangong-wiki vault diff [--since <date>] [--path <prefix>]
+tiangong-wiki vault queue [--status pending|processing|done|skipped|error]
 ```
 
 - `list` — List indexed vault files; `--path` does prefix matching on relative paths
@@ -235,7 +235,7 @@ wiki vault queue [--status pending|processing|done|skipped|error]
 ### lint
 
 ```
-wiki lint [--path <pagePath>] [--level error|warning|info] [--format text|json]
+tiangong-wiki lint [--path <pagePath>] [--level error|warning|info] [--format text|json]
 ```
 
 Validates all pages (or a single page with `--path`) for integrity issues at three severity levels:
@@ -247,7 +247,7 @@ Validates all pages (or a single page with `--path`) for integrity issues at thr
 ### export-graph
 
 ```
-wiki export-graph [--output <filePath>]
+tiangong-wiki export-graph [--output <filePath>]
 ```
 
 Exports all graph nodes (pages with node IDs) and edges as JSON. Prints to stdout by default; `--output` writes to a file.
@@ -255,7 +255,7 @@ Exports all graph nodes (pages with node IDs) and edges as JSON. Prints to stdou
 ### export-index
 
 ```
-wiki export-index [--output <filePath>] [--group-by pageType|tags]
+tiangong-wiki export-index [--output <filePath>] [--group-by pageType|tags]
 ```
 
 Generates a human-readable Markdown index of all pages. Default grouping: `pageType`.
@@ -263,10 +263,10 @@ Generates a human-readable Markdown index of all pages. Default grouping: `pageT
 ### daemon
 
 ```
-wiki daemon run               # Foreground (for process managers)
-wiki daemon start             # Background (detached process)
-wiki daemon stop
-wiki daemon status [--format text|json]
+tiangong-wiki daemon run               # Foreground (for process managers)
+tiangong-wiki daemon start             # Background (detached process)
+tiangong-wiki daemon stop
+tiangong-wiki daemon status [--format text|json]
 ```
 
 The daemon provides a local HTTP server (binds to `127.0.0.1` only) for the web dashboard and accelerated query routing. When running, query commands automatically use HTTP instead of direct database access.
@@ -274,7 +274,7 @@ The daemon provides a local HTTP server (binds to `127.0.0.1` only) for the web 
 ### dashboard
 
 ```
-wiki dashboard [--no-open] [--format text|json]
+tiangong-wiki dashboard [--no-open] [--format text|json]
 ```
 
 Opens the web dashboard in the default browser. Starts the daemon automatically if it is not already running. Use `--no-open` to print the URL without opening a browser.
