@@ -84,53 +84,7 @@ See [references/cli-interface.md](./references/cli-interface.md) for the full co
 
 ## Architecture
 
-```
-┌──────────────────────────────────────────────────────────┐
-│                     Vault (raw input)                     │
-│           PDFs, docs, notes, bookmarks, clippings         │
-└────────────────────────┬─────────────────────────────────┘
-                         │ vault diff / vault queue
-                         ▼
-┌──────────────────────────────────────────────────────────┐
-│              Agentic Workflow (Codex SDK)                 │
-│                                                          │
-│  ┌─────────┐  read    ┌────────────┐  discover  ┌─────┐ │
-│  │ Parser  │ ──────►  │ tiangong-wiki-skill │ ────────►  │ LLM │ │
-│  │ Skills  │  source  │ find / fts │  + decide  │     │ │
-│  └─────────┘          └────────────┘            └─────┘ │
-│  pdf · docx · pptx                                       │
-│                                                          │
-│  → skip / create page / update page / propose only       │
-└────────────────────────┬─────────────────────────────────┘
-                         │ write pages
-                         ▼
-┌──────────────────────────────────────────────────────────┐
-│                    Markdown Pages (SSOT)                  │
-│                    wiki/pages/**/*.md                     │
-└────────────────────────┬─────────────────────────────────┘
-                         │ tiangong-wiki sync
-                         ▼
-┌──────────────────────────────────────────────────────────┐
-│                   SQLite Index (index.db)                 │
-│                                                          │
-│  pages          structured metadata (dynamic columns)    │
-│  pages_fts      FTS5 full-text search                    │
-│  vec_pages      sqlite-vec vector embeddings             │
-│  edges          knowledge graph (source → target)        │
-└──┬───────────┬───────────┬───────────┬───────────────────┘
-   │           │           │           │
-   ▼           ▼           ▼           ▼
-  find        fts       search       graph
-   │           │           │           │
-   └───────────┴───────────┴───────────┘
-                     │
-                     ▼
-          JSON stdout / HTTP daemon
-                     │
-        ┌────────────┴────────────┐
-        ▼                         ▼
-   CLI / Scripts            Web Dashboard
-```
+![Tiangong-Wiki: The Persistent AI Knowledge Framework](./assets/tiangong-wiki-framework.png)
 
 **Vault → Pages** — Raw materials land in the vault. An agentic workflow reads each file, discovers the current ontology via `tiangong-wiki type list / find / fts`, and decides whether to skip, create, or update a page.
 
