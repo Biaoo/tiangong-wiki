@@ -143,8 +143,12 @@ export function BottomDock(props: BottomDockProps) {
   if (!props.expanded) {
     return (
       <div className="bottom-dock bottom-dock--collapsed">
-        <button type="button" onClick={props.onToggleExpanded}>
-          open operations dock
+        <button type="button" className="bottom-dock__launcher" onClick={props.onToggleExpanded}>
+          <span className="shell-eyebrow">Operations dock</span>
+          <strong>{props.activeTab}</strong>
+          <small>
+            queue {formatNumber(props.queueSummary?.counts.pending ?? props.status?.queue.pending ?? 0)} · logs {props.logStreamStatus}
+          </small>
         </button>
       </div>
     );
@@ -153,7 +157,11 @@ export function BottomDock(props: BottomDockProps) {
   return (
     <section className="bottom-dock" style={{ ["--dock-height" as "--dock-height"]: `${props.heightPercent}%` }}>
       <header className="bottom-dock__header">
-        <nav>
+        <div className="bottom-dock__header-copy">
+          <span className="shell-eyebrow">Operations workbench</span>
+          <p>queue flow, runtime logs, vault inspection and lint checks without stealing the graph stage.</p>
+        </div>
+        <nav className="bottom-dock__tabs">
           {TAB_ORDER.map((tab) => (
             <button
               key={tab}
@@ -178,7 +186,7 @@ export function BottomDock(props: BottomDockProps) {
               </button>
             ))}
           </div>
-          <button type="button" onClick={props.onToggleExpanded}>
+          <button type="button" className="bottom-dock__collapse" onClick={props.onToggleExpanded}>
             collapse
           </button>
         </div>

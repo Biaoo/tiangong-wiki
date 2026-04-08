@@ -1,3 +1,5 @@
+import type { RefObject } from "preact";
+
 import type { DashboardGraphOverview, DashboardQueueSummary, DashboardSearchResult, DashboardStatus } from "../types/dashboard";
 import { formatNumber, formatRelativeTime } from "../utils/format";
 
@@ -10,6 +12,7 @@ interface TopBarProps {
   searchLoading: boolean;
   refreshing: boolean;
   usingFallback: boolean;
+  searchInputRef: RefObject<HTMLInputElement>;
   onSearchQueryChange: (value: string) => void;
   onSelectSearchResult: (result: DashboardSearchResult) => void;
   onRefresh: () => void;
@@ -38,6 +41,7 @@ export function TopBar({
   searchLoading,
   refreshing,
   usingFallback,
+  searchInputRef,
   onSearchQueryChange,
   onSelectSearchResult,
   onRefresh,
@@ -45,46 +49,50 @@ export function TopBar({
 }: TopBarProps) {
   return (
     <header className="topbar">
-      <div className="topbar__brand">
+      <div className="topbar__brand shell-brand">
+        <span className="shell-eyebrow">Stellar Intel</span>
         <h1>Knowledge Constellation</h1>
-        <p>local knowledge graph + operations cockpit</p>
+        <p>whole-library graph observatory · localhost-only operations cockpit</p>
       </div>
 
       <div className="topbar__meta">
-        <div className={`daemon-chip ${daemonClass(status)}`}>
-          <span className="daemon-chip__dot" />
+        <div className={`shell-status-chip daemon-chip ${daemonClass(status)}`}>
+          <span className="shell-status-dot daemon-chip__dot" />
           <span>{status?.daemon.running ? "daemon online" : "daemon offline"}</span>
           <code>{status?.daemon.currentTask ?? "idle"}</code>
         </div>
-        <div className="topbar__counts">
-          <span title="total nodes">
+        <div className="shell-metrics topbar__counts">
+          <div title="total nodes">
             graph <strong>{formatNumber(graph?.totalNodes ?? 0)}</strong>
-          </span>
-          <span title="visible nodes">
+          </div>
+          <div title="visible nodes">
             visible <strong>{formatNumber(graph?.visibleNodeCount ?? 0)}</strong>
-          </span>
-          <span title="queue pending">
+          </div>
+          <div title="queue pending">
             queue <strong>{formatNumber(queue?.counts.pending ?? 0)}</strong>
-          </span>
+          </div>
         </div>
-        <div className="topbar__freshness">
+        <div className="topbar__freshness shell-meta">
           refreshed {formatRelativeTime(status?.generatedAt ?? null)}
-          {usingFallback && <em>mock fallback</em>}
+          {usingFallback && <em>fallback snapshot</em>}
         </div>
       </div>
 
       <div className="topbar__actions">
         <div className="global-search">
+          <span className="global-search__meta">
+            {searchLoading ? "scanning full library…" : `${searchResults.length} live hits`}
+          </span>
           <input
             aria-label="Search across all pages"
             autoComplete="off"
             placeholder="Search whole library…"
+            ref={searchInputRef}
             value={searchQuery}
             onInput={(event) =>
               onSearchQueryChange((event.currentTarget as HTMLInputElement).value)
             }
           />
-          <span>{searchLoading ? "searching…" : `${searchResults.length} hits`}</span>
           {searchQuery.trim() && searchResults.length > 0 && (
             <div className="search-results">
               {searchResults.slice(0, 12).map((result) => (
@@ -98,6 +106,7 @@ export function TopBar({
                   <small>
                     <code>{result.pageType}</code>
                     <code>{result.status}</code>
+                    {result.nodeId ? <code>{result.nodeId}</code> : null}
                     {result.updatedAt ? <span>{formatRelativeTime(result.updatedAt)}</span> : null}
                   </small>
                   <p>{result.summaryText || result.filePath}</p>
@@ -111,7 +120,7 @@ export function TopBar({
           replay ignition
         </button>
         <button className="btn btn-primary" onClick={onRefresh} type="button" disabled={refreshing}>
-          {refreshing ? "refreshing…" : "refresh status"}
+          {refreshing ? "refreshing…" : "manual refresh"}
         </button>
       </div>
     </header>

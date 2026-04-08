@@ -6,7 +6,7 @@ import { ConstellationIgnition, type IgnitionMode } from "./components/Constella
 import { DetailPanel } from "./components/DetailPanel";
 import { EnvironmentGate } from "./components/EnvironmentGate";
 import { GraphCanvas } from "./components/GraphCanvas";
-import { LeftRail } from "./components/LeftRail";
+import { LeftRail, type RailMode } from "./components/LeftRail";
 import { TopBar } from "./components/TopBar";
 import {
   mockGraphOverview,
@@ -198,6 +198,7 @@ function filterMockLintIssues(options: {
 export function App() {
   const apiRef = useRef<DashboardApiClient | null>(null);
   const introReplayTimerRef = useRef<number | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   if (!apiRef.current) {
     apiRef.current = new DashboardApiClient();
   }
@@ -227,6 +228,8 @@ export function App() {
   const [pageSource, setPageSource] = useState<DashboardPageSourceResponse | null>(null);
   const [searchPayload, setSearchPayload] = useState<DashboardGraphSearchResponse | null>(null);
   const [dockExpanded, setDockExpanded] = useState(false);
+  const [railMode, setRailMode] = useState<RailMode>("overview");
+  const [graphResetToken, setGraphResetToken] = useState(0);
   const [dockHeightPercent, setDockHeightPercent] = useState<40 | 55 | 70>(40);
   const [selectedQueueFileId, setSelectedQueueFileId] = useState<string | null>(null);
   const [selectedVaultFileId, setSelectedVaultFileId] = useState<string | null>(null);
@@ -567,11 +570,37 @@ export function App() {
     updateUrlState({ selectedPageId: pageId });
   }
 
+  function openDockTab(tab: DashboardTab) {
+    updateUrlState({ tab });
+    setDockExpanded(true);
+    if (tab === "system" || tab === "queue" || tab === "logs") {
+      setRailMode(tab);
+      return;
+    }
+    setRailMode("overview");
+  }
+
+  function activateRailMode(mode: RailMode) {
+    setRailMode(mode);
+    if (mode === "overview") {
+      updateUrlState({ selectedPageId: null });
+      setDockExpanded(false);
+      setGraphResetToken((value) => value + 1);
+      return;
+    }
+    if (mode === "search") {
+      searchInputRef.current?.focus();
+      searchInputRef.current?.select();
+      return;
+    }
+    openDockTab(mode);
+  }
+
   function inspectQueueLogs(fileId: string) {
     setLogFileIdFilter("");
     setLogQueryFilter(fileId);
-    updateUrlState({ tab: "logs" });
-    setDockExpanded(true);
+    setRailMode("logs");
+    openDockTab("logs");
   }
 
   async function refreshDashboard() {
@@ -674,11 +703,12 @@ export function App() {
 
   return (
     <EnvironmentGate>
-      <div className="dashboard-root">
+      <div className={`dashboard-root ${pageDetail ? "has-detail" : ""}`}>
         {showIntro ? (
           <ConstellationIgnition
             key={`${introMode}-${introReplayCount}`}
             graph={graph}
+            status={status}
             mode={introMode}
             onComplete={() => {
               window.sessionStorage.setItem(INTRO_STORAGE_KEY, "true");
@@ -696,8 +726,15 @@ export function App() {
           searchLoading={searchLoading}
           refreshing={refreshing}
           usingFallback={usingFallback}
-          onSearchQueryChange={(value) => updateUrlState({ query: value })}
-          onSelectSearchResult={(result) => openPage(result.id)}
+          searchInputRef={searchInputRef}
+          onSearchQueryChange={(value) => {
+            setRailMode("search");
+            updateUrlState({ query: value });
+          }}
+          onSelectSearchResult={(result) => {
+            setRailMode("search");
+            openPage(result.id);
+          }}
           onRefresh={() => void refreshDashboard()}
           onReplayIntro={() => {
             if (introReplayTimerRef.current !== null) {
@@ -713,12 +750,9 @@ export function App() {
         />
 
         <LeftRail
-          activeTab={activeTab}
+          activeMode={railMode}
           dockExpanded={dockExpanded}
-          onSelectTab={(tab) => {
-            updateUrlState({ tab });
-            setDockExpanded(true);
-          }}
+          onActivateMode={activateRailMode}
           onToggleDock={() => setDockExpanded((value) => !value)}
         />
 
@@ -729,6 +763,9 @@ export function App() {
             selectedPageId={urlState.selectedPageId}
             focusedPage={focusedPage}
             loading={refreshing || bootLoading}
+            searchQuery={urlState.query}
+            searchResultCount={selectedSearchResults.length}
+            resetViewToken={graphResetToken}
             onRefresh={() => void refreshDashboard()}
             onSelectPage={openPage}
           />
@@ -774,8 +811,7 @@ export function App() {
           logFileIdFilter={logFileIdFilter}
           logQueryFilter={logQueryFilter}
           onTabChange={(tab: DashboardTab) => {
-            updateUrlState({ tab });
-            setDockExpanded(true);
+            openDockTab(tab);
           }}
           onToggleExpanded={() => setDockExpanded((value) => !value)}
           onHeightPercentChange={setDockHeightPercent}

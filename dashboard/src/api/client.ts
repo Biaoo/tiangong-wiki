@@ -44,6 +44,12 @@ export interface LogStreamHandle {
   close: () => void;
 }
 
+function defaultDashboardApiBasePath(): string {
+  const baseUrl = typeof import.meta !== "undefined" && import.meta.env?.BASE_URL ? import.meta.env.BASE_URL : "/";
+  const normalizedBase = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
+  return `${normalizedBase || ""}/api/dashboard`;
+}
+
 function buildQuery(
   params: Record<string, string | number | boolean | null | undefined>,
 ): string {
@@ -81,7 +87,7 @@ function normalizeLogEntry(raw: unknown): DashboardLogEntry | null {
 export class DashboardApiClient {
   private readonly basePath: string;
 
-  constructor(basePath = "/api/dashboard") {
+  constructor(basePath = defaultDashboardApiBasePath()) {
     this.basePath = basePath;
   }
 

@@ -1,43 +1,50 @@
 import type { DashboardTab } from "../types/dashboard";
 
+export type RailMode = "overview" | "search" | "system" | "queue" | "logs";
+
 interface LeftRailProps {
-  activeTab: DashboardTab;
-  onSelectTab: (tab: DashboardTab) => void;
+  activeMode: RailMode;
+  onActivateMode: (mode: RailMode) => void;
   dockExpanded: boolean;
   onToggleDock: () => void;
 }
 
-const ITEMS: Array<{ tab: DashboardTab; label: string; short: string }> = [
-  { tab: "system", label: "System Status", short: "SY" },
-  { tab: "queue", label: "Queue", short: "Q" },
-  { tab: "logs", label: "Logs", short: "LG" },
-  { tab: "vault", label: "Vault", short: "VT" },
-  { tab: "lint", label: "Lint", short: "LT" },
+const ITEMS: Array<{ mode: RailMode; label: string; icon: string; tab?: DashboardTab }> = [
+  { mode: "overview", label: "Observatory", icon: "◎" },
+  { mode: "search", label: "Search Sweep", icon: "⌕" },
+  { mode: "system", label: "System Pulse", icon: "◫", tab: "system" },
+  { mode: "queue", label: "Queue Flow", icon: "⌁", tab: "queue" },
+  { mode: "logs", label: "Log Stream", icon: "⋰", tab: "logs" },
 ];
 
-export function LeftRail({ activeTab, onSelectTab, dockExpanded, onToggleDock }: LeftRailProps) {
+export function LeftRail({ activeMode, onActivateMode, dockExpanded, onToggleDock }: LeftRailProps) {
   return (
     <aside className="left-rail">
       <div className="left-rail__header">
-        <span>WORKBENCH</span>
+        <span className="shell-eyebrow">Orbit</span>
       </div>
       <nav className="left-rail__nav">
         {ITEMS.map((item) => (
           <button
-            key={item.tab}
-            className={`left-rail__item ${activeTab === item.tab ? "is-active" : ""}`}
+            key={item.mode}
+            className={`left-rail__item ${activeMode === item.mode ? "is-active" : ""}`}
             type="button"
+            data-label={item.label}
             title={item.label}
-            onClick={() => onSelectTab(item.tab)}
+            onClick={() => onActivateMode(item.mode)}
           >
-            <span>{item.short}</span>
+            <span aria-hidden="true">{item.icon}</span>
             <small>{item.label}</small>
           </button>
         ))}
       </nav>
-      <button className="left-rail__dock-toggle" type="button" onClick={onToggleDock}>
-        {dockExpanded ? "collapse dock" : "expand dock"}
-      </button>
+
+      <div className="left-rail__footer">
+        <button className="left-rail__dock-toggle" type="button" onClick={onToggleDock}>
+          <span>dock</span>
+          <strong>{dockExpanded ? "live" : "idle"}</strong>
+        </button>
+      </div>
     </aside>
   );
 }
