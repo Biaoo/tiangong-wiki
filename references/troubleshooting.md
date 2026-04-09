@@ -1,10 +1,30 @@
-# Environment Variables
+# Troubleshooting
 
-All configuration is managed through `.wiki.env` (created by `tiangong-wiki setup`). Variables can also be set in shell environment or a `.env` file.
+Diagnosis and configuration reference for the wiki skill. Start with `tiangong-wiki doctor` for automated health checks.
 
 ---
 
-## Core
+## Quick Diagnosis
+
+```bash
+# Run the built-in diagnostic
+tiangong-wiki doctor
+
+# Check configuration validity
+tiangong-wiki check-config
+
+# Check workspace health
+tiangong-wiki stat
+tiangong-wiki lint
+```
+
+---
+
+## Environment Variables
+
+All configuration is managed through `.wiki.env` (created by `tiangong-wiki setup`). Variables can also be set in shell environment or a `.env` file.
+
+### Core
 
 | Variable | Required | Description |
 | --- | --- | --- |
@@ -14,7 +34,7 @@ All configuration is managed through `.wiki.env` (created by `tiangong-wiki setu
 | `WIKI_TEMPLATES_PATH` | Yes | Path to the templates directory |
 | `WIKI_SYNC_INTERVAL` | No | Auto-sync interval in seconds (default: `86400`) |
 
-## Vault
+### Vault
 
 | Variable | Required | Description |
 | --- | --- | --- |
@@ -23,7 +43,7 @@ All configuration is managed through `.wiki.env` (created by `tiangong-wiki setu
 | `VAULT_HASH_MODE` | No | Hash mode for change detection (`content` or `mtime`, default: `mtime`) |
 | `VAULT_SYNOLOGY_REMOTE_PATH` | If `synology` | Remote path on Synology NAS |
 
-## Synology (when `VAULT_SOURCE=synology`)
+### Synology (when `VAULT_SOURCE=synology`)
 
 | Variable | Required | Description |
 | --- | --- | --- |
@@ -33,7 +53,7 @@ All configuration is managed through `.wiki.env` (created by `tiangong-wiki setu
 | `SYNOLOGY_VERIFY_SSL` | No | Verify SSL certificates (default: `true`) |
 | `SYNOLOGY_READONLY` | No | Read-only mode (default: `false`) |
 
-## Embedding
+### Embedding
 
 | Variable | Required | Description |
 | --- | --- | --- |
@@ -42,9 +62,9 @@ All configuration is managed through `.wiki.env` (created by `tiangong-wiki setu
 | `EMBEDDING_MODEL` | Yes | Embedding model name |
 | `EMBEDDING_DIMENSIONS` | No | Vector dimensions (default: model-dependent) |
 
-## Agent (Agentic Workflow)
+### Agent (Agentic Workflow)
 
-The agent uses [Codex SDK](https://www.npmjs.com/package/@openai/codex-sdk) to process vault items. When `WIKI_AGENT_BASE_URL` is set, a custom `model_provider` is injected to override any global `~/.codex/config.toml` settings, ensuring requests go to the correct endpoint.
+The agent uses [Codex SDK](https://www.npmjs.com/package/@openai/codex-sdk) to process vault items. When `WIKI_AGENT_BASE_URL` is set, a custom `model_provider` is injected to override any global `~/.codex/config.toml` settings.
 
 | Variable | Required | Description |
 | --- | --- | --- |
@@ -55,9 +75,38 @@ The agent uses [Codex SDK](https://www.npmjs.com/package/@openai/codex-sdk) to p
 | `WIKI_AGENT_BATCH_SIZE` | No | Max concurrent vault items per batch (default: `5`) |
 | `WIKI_PARSER_SKILLS` | No | Comma-separated parser skill list (e.g. `pdf,docx,pptx,xlsx`) |
 
-### OpenAI (default)
+---
 
-No special setup required. Set `WIKI_AGENT_BASE_URL` to `https://api.openai.com/v1` (or leave empty) and provide your API key.
+## Common Issues
+
+### "WIKI_PATH is not set" or config errors
+
+Run `tiangong-wiki setup` to create `.wiki.env` with all required paths. Verify with `tiangong-wiki check-config`.
+
+### Semantic search returns no results
+
+`tiangong-wiki search` and `tiangong-wiki type recommend` (with embeddings) require `EMBEDDING_*` variables. If not configured, use `tiangong-wiki fts` (full-text search) or `tiangong-wiki find` (metadata filter) instead.
+
+### Index out of sync
+
+Run `tiangong-wiki sync` to rebuild. For a single page: `tiangong-wiki sync --path <page-id>`.
+
+### Lint errors after page edits
+
+Always run `tiangong-wiki lint --path <page-id> --format json` after mutations. Common lint issues:
+- Missing required frontmatter fields for the page type
+- Broken `sourceRefs` pointing to non-existent pages
+- Orphan pages with no graph connections
+
+### Parser skills not found
+
+Parser skills must be installed under `<workspace-root>/.agents/skills/`. Run `tiangong-wiki skill` to inspect installed skills. Use `tiangong-wiki skill update --all` to update.
+
+---
+
+## LLM Provider Setup
+
+### OpenAI (default)
 
 ```env
 WIKI_AGENT_ENABLED=true
@@ -65,9 +114,9 @@ WIKI_AGENT_API_KEY=sk-...
 WIKI_AGENT_MODEL=gpt-5.4
 ```
 
-### vLLM
+### vLLM (self-hosted)
 
-vLLM can serve as a self-hosted LLM provider via its OpenAI-compatible API. Wiki's agentic workflow communicates through the [Responses API](https://platform.openai.com/docs/api-reference/responses) (`/v1/responses`), which requires vLLM **v0.8.5+**.
+Requires vLLM **v0.8.5+** for Responses API support (`/v1/responses`).
 
 ```env
 WIKI_AGENT_ENABLED=true
@@ -78,19 +127,9 @@ WIKI_AGENT_MODEL=Qwen/Qwen3.5-397B-A17B-GPTQ-Int4
 
 #### Chat template: `developer` role support
 
-The Codex CLI sends `developer`-role messages (the OpenAI equivalent of `system` that can appear mid-conversation). Most model chat templates only recognize `system`, `user`, `assistant`, and `tool` — they will reject `developer` with:
+The Codex CLI sends `developer`-role messages. Most model chat templates only recognize `system`, `user`, `assistant`, and `tool` — they will reject `developer` with `400 Bad Request: "Unexpected message role."`.
 
-```
-400 Bad Request: "Unexpected message role."
-```
-
-**Fix:** Use a modified chat template that maps `developer` → `system`. A ready-to-use template for Qwen3.5 is included at:
-
-```
-assets/vllm/qwen3_5_openai_developer.jinja
-```
-
-Launch vLLM with the custom template:
+**Fix:** Use a modified chat template that maps `developer` → `system`. A ready-to-use template for Qwen3.5 is at `assets/vllm/qwen3_5_openai_developer.jinja`.
 
 ```bash
 vllm serve <model> \
@@ -98,17 +137,11 @@ vllm serve <model> \
   --port 7730
 ```
 
-The template is derived from the official Qwen3.5 template with a single semantic change: `developer` messages are treated as `system` messages. Key modifications:
-
-1. **Instruction prefix detection** — counts both `system` and `developer` at the start of the conversation (line 56)
-2. **Role normalization** — `developer` → `system` throughout the conversation loop (lines 111, 160, 166)
-
-> For other model families (LLaMA, Mistral, etc.), apply the same pattern: find `message.role == "system"` checks in the template and extend them to also match `"developer"`.
+For other model families, apply the same pattern: extend `message.role == "system"` checks to also match `"developer"`.
 
 #### Verifying vLLM compatibility
 
 ```bash
-# Test the /v1/responses endpoint directly
 curl -s http://<host>:<port>/v1/responses \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <token>" \
@@ -118,5 +151,3 @@ curl -s http://<host>:<port>/v1/responses \
     "reasoning": {"effort": "low"}
   }' | head -c 500
 ```
-
-A successful response returns a JSON object with `output` containing the model's reply.

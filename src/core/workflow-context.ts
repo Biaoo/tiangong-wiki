@@ -105,7 +105,7 @@ export function buildVaultWorkflowPrompt(input: VaultWorkflowPromptInput): strin
     "## Step 1 — Read and Discover",
     "",
     "1. Read queue-item.json next to RESULT_JSON_PATH.",
-    "2. Read the target vault file at VAULT_FILE_PATH. Refer to `references/vault-file-processing.md` in the wiki package for file-type-specific reading strategies, parser skill discovery, image handling, and metadata utilization.",
+    "2. Read the target vault file at VAULT_FILE_PATH. Refer to `references/vault-to-wiki-instruction.md` (Phase 1) in the wiki package for file-type-specific reading strategies, parser skill discovery, image handling, and metadata utilization.",
     "3. Discover the current page type ontology via `tiangong-wiki type list` and `tiangong-wiki type show <type>`. Do not assume any type, template, or default target type.",
     "4. Search the existing wiki for overlapping or related content:",
     "   - Use `tiangong-wiki fts` and `tiangong-wiki search` with key terms from the source.",

@@ -1,117 +1,84 @@
 ---
 name: tiangong-wiki-skill
-description: "Local-first wiki query and page-maintenance interface over Markdown knowledge pages indexed into SQLite. Use when an agent should discover existing knowledge before answering, inspect vault changes or queue state, choose how new durable knowledge fits the current ontology, or create/update wiki pages in a local knowledge workspace."
+description: "Local-first wiki query and page-maintenance interface over Markdown knowledge pages indexed into SQLite. Use when an agent should discover existing knowledge before answering, capture durable insights from conversations or workflows, or maintain and correct existing wiki content."
 ---
 
 # Wiki Skill
 
 ## Core Goal
-- Use the local wiki as the durable knowledge layer for future work, not just the current conversation.
-- Query SQLite first, then read or edit the Markdown files that remain the source of truth.
-- Treat page types as runtime-discovered ontology. Do not hardcode a default destination for new knowledge.
 
-## Use When
-Use `tiangong-wiki-skill` when:
-- You should check whether the answer already exists in the local wiki before writing a fresh answer.
-- You need to inspect the current ontology, template structure, or type recommendations before creating a page.
-- A durable insight, correction, workflow, lesson, or source-derived knowledge should be preserved for reuse.
-- New files appeared in `vault/` and you need to inspect `vault diff` or `vault queue` before deciding what knowledge work to do.
-- You need a structured view of the graph, stale content, orphan pages, provenance, or general workspace health.
-- You need to create or update a page and immediately re-index it.
+Use the local wiki as the **durable knowledge layer** — not just for the current conversation, but for all future work. Query first, then read or edit the Markdown files that remain the source of truth.
 
-## Retrieval Strategy
-- Exact metadata, type, tag, status, node id, or dynamic column filter: `tiangong-wiki find`
-- Keyword or short literal clue: `tiangong-wiki fts`
-- Fuzzy natural-language retrieval with embeddings configured: `tiangong-wiki search`
-- Graph neighborhood, prerequisites, or multi-hop relations: `tiangong-wiki graph`
-- Single-page metadata, edges, provenance, or file path: `tiangong-wiki page-info`
-- Workspace inventory or health: `tiangong-wiki list`, `tiangong-wiki stat`, `tiangong-wiki lint`
-- Ontology discovery: `tiangong-wiki type list`, `tiangong-wiki type show`, `tiangong-wiki type recommend`
-- Vault ingestion status: `tiangong-wiki vault diff`, `tiangong-wiki vault list`, `tiangong-wiki vault queue`
+## When to Use
 
-## Knowledge Capture Workflow
-Use this when new knowledge should become part of the wiki.
+Activate this skill in three scenarios:
 
-1. Query for close existing pages with `tiangong-wiki find`, `tiangong-wiki fts`, or `tiangong-wiki search`.
-2. Discover the current ontology with:
-   - `tiangong-wiki type list --format json`
-   - `tiangong-wiki type show <type> --format json`
-   - `tiangong-wiki type recommend --text "<summary>" --keywords "a,b,c" --format json`
-3. Update the best existing page when the knowledge object already exists.
-4. Create a new page only when the knowledge object is distinct and the current ontology supports it cleanly.
-5. Edit the Markdown file directly.
-6. Run `tiangong-wiki sync --path <page-id>`.
-7. Run `tiangong-wiki lint --path <page-id> --format json`.
+### 1. Knowledge Retrieval
 
-```bash
-tiangong-wiki find --type method --tag evidence
-tiangong-wiki type list --format json
-tiangong-wiki type recommend --text "A repeatable workflow for evidence review" --keywords "workflow,procedure" --limit 5 --format json
-tiangong-wiki create --type method --title "Evidence Review Workflow"
-tiangong-wiki sync --path methods/evidence-review-workflow.md
-tiangong-wiki lint --path methods/evidence-review-workflow.md --format json
-```
+You need historical knowledge, methods, behavioral patterns, or prior decisions before answering or acting.
 
-## Vault Review Workflow
-Use this when `vault/` may contain source files that should influence wiki knowledge.
+**Trigger:** The current task could benefit from previously captured insights, or the user asks about something that may already exist in the wiki.
 
-1. Run `tiangong-wiki sync` to refresh indexes, vault metadata, and queue state.
-2. Inspect recent vault changes with `tiangong-wiki vault diff`.
-3. Inspect queue state with `tiangong-wiki vault queue`.
-4. Discover the ontology through `tiangong-wiki type list/show/recommend` before deciding what to create or update.
-5. Preserve provenance with `sourceRefs` and any source-specific fields required by the chosen page type.
-6. Remember that `source-summary` is only one possible type. A vault file may lead to `skip`, an update to an existing page, a new page of any registered type, or a proposal to evolve the ontology.
+**Minimal steps:**
+1. Choose a retrieval strategy based on what you know:
+   - Know the type, tag, or metadata → `tiangong-wiki find`
+   - Have a keyword or short phrase → `tiangong-wiki fts`
+   - Fuzzy intent, embeddings configured → `tiangong-wiki search`
+   - Need graph context or related pages → `tiangong-wiki graph`
+2. Inspect the best candidate with `tiangong-wiki page-info <id>`.
+3. Read the Markdown file if you need full content.
 
-```bash
-tiangong-wiki sync
-tiangong-wiki vault diff
-tiangong-wiki vault queue
-tiangong-wiki type list --format json
-tiangong-wiki type recommend --text "Operational brief about evidence review" --keywords "operations,evidence" --limit 5 --format json
-tiangong-wiki find --type method --tag evidence
-```
+**Stop when:** you have enough context to proceed, or no relevant pages exist.
 
-## Maintenance Rules
-- Do not assume any single page type is the default landing zone for vault files.
-- Prefer updating the best existing page before creating near-duplicates.
-- Use CLI discovery instead of static assumptions about templates or registered types.
-- If the current ontology is not a clean fit, consider template evolution deliberately; do not improvise undocumented structure.
-- After every mutation, re-index and lint the changed page before trusting query results.
+### 2. Knowledge Capture
 
-## Layer Boundary
-- `SKILL.md` describes the on-demand skill interface used by agents during queries and manual knowledge maintenance.
-- Automatic vault-to-wiki processing, daemon scheduling, queue retries, NAS polling, and workflow artifacts belong to the service layer.
-- Service-layer operations are documented in `references/service-admin.md`.
+A conversation, task, or other skill produced a high-value insight, method, correction, or piece of information worth preserving.
 
-## Environment Contract
-Required:
-- `WIKI_PATH`
+**Trigger:** You recognize durable knowledge — something that would be useful to retrieve in a future context.
 
-Optional for semantic retrieval or vector-based type recommendation:
-- `EMBEDDING_BASE_URL`
-- `EMBEDDING_API_KEY`
-- `EMBEDDING_MODEL`
-- `EMBEDDING_DIMENSIONS`
+**Two paths:**
 
-Automatic vault processing uses additional `WIKI_AGENT_*` variables, but those belong to the service layer rather than the skill interface. Read `references/service-admin.md` when operating the daemon or queue worker.
+- **Direct page creation** — when you can clearly identify the page type and structure the content yourself:
+  1. Search for existing pages to avoid duplicates (`find`, `fts`, or `search`).
+  2. Discover the ontology: `tiangong-wiki type recommend --text "<summary>" --keywords "a,b,c" --format json`.
+  3. Update an existing page if one covers the same knowledge object. Create a new page only when the object is distinct.
+  4. After writing: `tiangong-wiki sync --path <page-id>` then `tiangong-wiki lint --path <page-id> --format json`.
 
-## Output Contract
-- Query commands return JSON to stdout.
-- Mutating commands return JSON summaries or created file paths to stdout.
-- `lint`, `check-config`, `template list/show`, `type list/show/recommend`, and `daemon status` support text or JSON output where documented.
-- Errors are emitted as structured JSON to stderr with `type=config|runtime|not_found|not_configured`.
+- **Save to vault** — when the material is raw, complex, or needs further processing:
+  1. Save the file to `vault/`.
+  2. The vault-to-wiki workflow will handle triage and page creation.
+  3. See `references/vault-to-wiki-instruction.md` for the full decision model.
 
-## References
-- `references/cli-interface.md`
-- `references/data-model.md`
-- `references/template-design-guide.md`
-- `references/runtime.md`
-- `references/env.md`
-- `references/wiki-maintenance-instruction.md`
-- `references/vault-to-wiki-instruction.md`
-- `references/vault-file-processing.md`
-- `references/service-admin.md`
+**Key rules:**
+- Do not assume any page type is the default destination. Always discover via CLI.
+- Prefer updating the best existing page over creating near-duplicates.
+- Only use frontmatter fields declared by the chosen type (`tiangong-wiki type show <type>`). Do not invent ad-hoc fields.
+- Preserve provenance with `sourceRefs` and type-specific source fields.
+
+### 3. Knowledge Maintenance
+
+You discover that existing wiki content is outdated, incorrect, or incomplete during retrieval or conversation.
+
+**Trigger:** A retrieved page contains stale information, or new evidence contradicts existing content.
+
+**Minimal steps:**
+1. Locate the page: `tiangong-wiki find` or `tiangong-wiki page-info <id>`.
+2. Edit the Markdown file — keep edits minimal and provenance-preserving.
+3. After editing: `tiangong-wiki sync --path <page-id>` then `tiangong-wiki lint --path <page-id> --format json`.
+
+**For systematic maintenance** (health checks, orphan cleanup, stale content review), see `references/wiki-maintenance-instruction.md`.
+
+## References (read on demand)
+
+| Document | Read when... |
+|----------|-------------|
+| `references/cli-interface.md` | You need full command options, flags, or output format details |
+| `references/vault-to-wiki-instruction.md` | Processing vault files into wiki pages |
+| `references/wiki-maintenance-instruction.md` | Running systematic maintenance or health checks |
+| `references/template-design-guide.md` | Designing a new page type or evolving an existing template |
+| `references/troubleshooting.md` | Environment setup, configuration issues, or error diagnosis |
 
 ## Assets
-- `assets/wiki.config.default.json`
-- `assets/templates/`
+
+- `assets/wiki.config.default.json` — default configuration template
+- `assets/templates/` — Markdown page templates for each registered type
