@@ -20,6 +20,7 @@ npm run dev -- <command> [options]
 | Command | Description |
 | --- | --- |
 | `setup` | Interactive configuration wizard — writes `.wiki.env` and scaffolds workspace |
+| `skill` | Inspect and update workspace-local managed skills |
 | `doctor` | Diagnose configuration, paths, embedding, and daemon health |
 | `init` | Initialize workspace assets and run the first sync |
 | `sync` | Incrementally sync pages, embeddings, and vault metadata |
@@ -195,6 +196,25 @@ tiangong-wiki create --type <pageType> --title <title> [--node-id <nodeId>]
 Creates a page from the corresponding template in `wiki/templates/`, fills frontmatter fields (title, createdAt, updatedAt, etc.), writes to `wiki/pages/`, and immediately indexes it.
 
 Output: `{ created, filePath }`.
+
+### skill
+
+```
+tiangong-wiki skill add <source> --skill <name> [--force] [--format text|json]
+tiangong-wiki skill status [name] [--format text|json]
+tiangong-wiki skill update [name] [--all] [--force] [--format text|json]
+```
+
+- `add` — Install a skill from any repo URL or local path via the external `npx skills add <source> --skill <name> -a codex -y` flow, then start tracking it as a managed workspace-local skill
+- `status` — Inspect managed workspace-local skills such as `tiangong-wiki-skill`, parser skills declared in `WIKI_PARSER_SKILLS`, and repo/path-sourced skills previously added via `skill add`
+- `update` — Install missing managed skills, refresh skills that have newer source content, and refuse to overwrite local conflicts unless `--force` is passed
+
+The command distinguishes at least four states:
+
+- `up_to_date` — Installed content matches the current managed source
+- `update_available` — Upstream changed and local files still match the managed baseline
+- `conflict` — Local files differ from the managed baseline, so update will be skipped unless `--force` is used
+- `missing` — Skill is absent or unreadable and can be installed
 
 ### template
 

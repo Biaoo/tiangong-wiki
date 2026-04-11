@@ -41,16 +41,27 @@ Or let the setup wizard handle everything:
 tiangong-wiki setup
 ```
 
+To manage workspace-local skills from arbitrary repo/path sources after setup:
+
+```bash
+tiangong-wiki skill add ../my-skills --skill notes
+tiangong-wiki skill status
+tiangong-wiki skill update notes
+```
+
 </details>
 
 ## Quick Start
 
 ```bash
+cd /path/to/your/workspace                           # run commands from the workspace root
 tiangong-wiki setup                                   # interactive config wizard
 tiangong-wiki doctor                                  # verify configuration
 tiangong-wiki init                                    # initialize workspace
 tiangong-wiki sync                                    # index Markdown pages
 ```
+
+`tiangong-wiki setup` creates `.wiki.env`. Subsequent commands such as `doctor`, `init`, and `sync` should be run from the workspace root containing that `.wiki.env`, or with `WIKI_ENV_FILE` pointing to it explicitly.
 
 ```bash
 tiangong-wiki find --type concept --status active     # structured query
@@ -64,12 +75,12 @@ tiangong-wiki daemon run                              # start dashboard & HTTP A
 tiangong-wiki dashboard                               # open dashboard in browser
 ```
 
-> Environment variables are managed via `.wiki.env` (created by `tiangong-wiki setup`). See [references/env.md](./references/env.md) for the full reference.
+> Environment variables are managed via `.wiki.env` (created by `tiangong-wiki setup`). The CLI auto-discovers the nearest `.wiki.env` by walking upward from your current directory. See [references/troubleshooting.md](./references/troubleshooting.md) for the full reference.
 
 ## CLI
 
 ```
-Setup         setup · doctor · check-config
+Setup         setup · skill · doctor · check-config
 Indexing      init · sync
 Query         find · fts · search · graph
 Inspect       list · page-info · stat · lint

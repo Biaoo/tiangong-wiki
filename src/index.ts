@@ -20,6 +20,7 @@ import { registerListCommand } from "./commands/list.js";
 import { registerPageInfoCommand } from "./commands/page-info.js";
 import { registerSearchCommand } from "./commands/search.js";
 import { registerSetupCommand } from "./commands/setup.js";
+import { registerSkillCommand } from "./commands/skill.js";
 import { registerStatCommand } from "./commands/stat.js";
 import { registerSyncCommand } from "./commands/sync.js";
 import { registerTemplateCommand } from "./commands/template.js";
@@ -47,6 +48,7 @@ function buildProgram(): Command {
   }
 
   registerSetupCommand(program);
+  registerSkillCommand(program);
   registerInitCommand(program);
   registerDoctorCommand(program);
   registerSyncCommand(program);
