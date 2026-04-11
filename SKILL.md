@@ -1,6 +1,6 @@
 ---
 name: tiangong-wiki-skill
-description: "Local-first wiki query and page-maintenance interface over Markdown knowledge pages indexed into SQLite. Use when an agent should discover existing knowledge before answering, capture durable insights from conversations or workflows, or maintain and correct existing wiki content."
+description: "Use when you need to retrieve historically accumulated knowledge, methods, or behavioral patterns before answering or acting; when a conversation or workflow produces durable insights worth preserving for future reuse; or when you discover existing wiki content that is outdated or incorrect and needs correction."
 ---
 
 # Wiki Skill
