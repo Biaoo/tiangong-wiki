@@ -1,16 +1,50 @@
-# Template 设计指南
+# Template Design Guide
 
-本文档定义如何为 wiki 设计新的 page type 和对应 template。适用于手动创建和 AI 自动演化（`ALLOW_TEMPLATE_EVOLUTION=true`）两种场景。
+How to design a new page type and its template for the wiki. Use this guide when the current ontology cannot cleanly represent new knowledge and a new type is genuinely needed.
 
 ---
 
-## 1. Template 是什么
+## When to Create a New Type vs. Use an Existing One
 
-一个 template 由两部分组成：
+Before creating a new type, check whether the knowledge fits an existing type:
 
-### 模板文件（`templates/<type>.md`）
+- **Structural difference** → new type needed (different fields, different sections)
+- **Topic difference only** → use an existing type with different tags
 
-定义页面的 frontmatter 字段和 body section 骨架：
+Examples:
+- "Environmental research note" vs. "Education research note" → same `research-note` type, different tags
+- "Meeting minutes" vs. "Research note" → structurally different (participants, decisions, action items vs. research questions, literature, findings), new type needed
+
+**Always discover the current ontology first:**
+
+```bash
+tiangong-wiki type list --format json
+tiangong-wiki type recommend --text "<summary>" --keywords "a,b,c" --limit 5 --format json
+```
+
+If `type recommend` returns a good fit with high confidence, use that type. Only proceed with type creation when the fit is clearly poor.
+
+## Create vs. Propose Only
+
+When the existing type system is not a clean fit:
+
+- **Create the template yourself** when the need is clear, the structure is well-defined, and you can design a complete template following this guide.
+- **Use `propose_only`** (in vault-to-wiki workflow) or flag for human review when:
+  - The knowledge domain is unfamiliar and the right structure is uncertain
+  - Multiple reasonable type designs exist and the choice has long-term ontology impact
+  - The new type would overlap significantly with existing types
+
+See `references/vault-to-wiki-instruction.md` for how `propose_only` works in the vault workflow.
+
+---
+
+## Template Composition
+
+A template has two parts — both are required:
+
+### Template File (`templates/<type>.md`)
+
+Defines the frontmatter fields and body section skeleton:
 
 ```yaml
 ---
@@ -29,16 +63,16 @@ updatedAt: 2026-04-06
 
 ## Section 1
 
-引导性提示文本，告诉作者这一节该写什么。
+Guiding prompt that tells the author what to write in this section.
 
 ## Section 2
 
 ...
 ```
 
-### 配置注册（`wiki.config.json` 的 `templates.<type>`）
+### Config Registration (`wiki.config.json` under `templates.<type>`)
 
-定义该类型的索引行为：
+Defines how the type is indexed:
 
 ```json
 {
@@ -49,57 +83,42 @@ updatedAt: 2026-04-06
 }
 ```
 
-两者缺一不可。模板文件定义"写什么"，配置注册定义"怎么索引"。
+The template file defines "what to write"; the config registration defines "how to index".
 
 ---
 
-## 2. 何时需要新 Type
+## Frontmatter Field Design
 
-创建新 type 之前，先确认现有类型是否能覆盖：
+### Common Fields (inherited automatically)
 
-- 这类知识的**结构**是否与现有类型有本质差异？（字段不同、section 不同）
-- 还是仅仅是**主题**不同？（同样的结构，只是内容领域不同）
-
-**主题差异用 tags 区分，结构差异才建新 type。**
-
-示例判断：
-- "环境领域的研究笔记" vs "教育领域的研究笔记" → 用 `research-note` + 不同 tags
-- "会议纪要" vs "研究笔记" → 结构不同（参会人、决议、待办 vs 研究问题、文献、发现），需要新 type
-
----
-
-## 3. Frontmatter 字段设计
-
-### 通用字段（不需要设计，自动继承）
-
-所有 type 共享以下字段，模板中必须包含：
+All types share these fields — always include them in the template:
 
 ```yaml
 pageType, title, nodeId, status, visibility,
 sourceRefs, relatedPages, tags, createdAt, updatedAt
 ```
 
-### Type-specific 字段设计原则
+### Type-Specific Field Principles
 
-1. **只加对查询或分类有意义的字段**。如果一个字段只在 body 中出现，不需要放进 frontmatter
-2. **字段值应该是短文本或枚举**，不是长段落。长内容放 body section
-3. **字段命名使用 camelCase**，系统会自动映射为 snake_case 列名
-4. **不要重复通用字段的语义**。比如不要加 `category` 字段，用 `tags` 代替
+1. **Only add fields that serve querying or classification.** If a field only appears in the body, it does not belong in frontmatter.
+2. **Field values should be short text or enums**, not long paragraphs. Long content belongs in body sections.
+3. **Use camelCase for field names** — the system maps them to snake_case column names automatically.
+4. **Do not duplicate common field semantics.** For example, do not add a `category` field when `tags` already serves that purpose.
 
-### 字段放哪一层
+### Where to Register Each Field
 
-| 问题 | 放在 | 原因 |
+| Question | Register in | Reason |
 | --- | --- | --- |
-| 需要 `tiangong-wiki find --<field>` 过滤？ | `columns` | 建 SQLite 索引列，支持结构化查询 |
-| 需要出现在 `tiangong-wiki search` / `tiangong-wiki fts` 的摘要中？ | `summaryFields` | 纳入 summary_text 用于检索 |
-| 需要生成 edge（关联到其他页面/节点）？ | `edges` | 写入 edges 表，支持 graph 遍历 |
-| 只是页面内的补充信息？ | 仍需显式登记到 schema | 当前实现不会接受“只写 frontmatter、不做声明”的字段 |
+| Need `tiangong-wiki find --<field>` filtering? | `columns` | Creates a SQLite indexed column for structured queries |
+| Should appear in `search` / `fts` summaries? | `summaryFields` | Included in `summary_text` for retrieval |
+| Generates an edge to another page/node? | `edges` | Written to the edges table for graph traversal |
+| Just supplementary page info? | Still must be declared | Current implementation rejects undeclared fields — register in `columns`, `edges`, or `commonEdges` |
 
 ---
 
-## 4. Columns 设计
+## Columns Design
 
-`columns` 中的字段会在 `pages` 表上建列和索引，支持 `tiangong-wiki find` 的结构化过滤。
+Fields in `columns` become indexed columns on the `pages` table, supporting `tiangong-wiki find` filtering.
 
 ```json
 "columns": {
@@ -108,19 +127,18 @@ sourceRefs, relatedPages, tags, createdAt, updatedAt
 }
 ```
 
-**设计要点**：
-
-- 类型目前只支持 `"text"`
-- 只有需要频繁按值过滤的字段才值得建列
-- 不同 type 的 columns 共存于同一张 `pages` 表，非该类型的页面该列值为 NULL
-- 列名全局唯一 — 如果两个 type 都有 `severity` 字段，它们共享同一个列
-- 任何模板 frontmatter 中出现的 type-specific 字段，都必须至少在 `columns`、`edges` 或 `commonEdges` 之一中声明；否则会被 lint 视为 `unregistered_fields`
+Key points:
+- Column type is currently only `"text"`
+- Only fields that need frequent value-based filtering are worth indexing
+- Different types share the same `pages` table — columns from other types are NULL
+- Column names are globally unique — if two types both have `severity`, they share one column
+- Every type-specific frontmatter field must be declared in at least `columns`, `edges`, or `commonEdges`; otherwise lint reports `unregistered_fields`
 
 ---
 
-## 5. Edges 设计
+## Edges Design
 
-`edges` 定义 frontmatter 中的数组字段如何生成 graph 边。
+`edges` defines how frontmatter array fields generate graph edges.
 
 ```json
 "edges": {
@@ -131,76 +149,68 @@ sourceRefs, relatedPages, tags, createdAt, updatedAt
 }
 ```
 
-**三个字段**：
-
-| 字段 | 必填 | 说明 |
+| Field | Required | Description |
 | --- | --- | --- |
-| `edgeType` | 是 | edge 类型标识，写入 `edges.edge_type` |
-| `resolve` | 是 | 目标匹配方式：`"nodeId"` 匹配 `pages.node_id`；`"path"` 匹配 `pages.id` |
-| `match` | 否 | 正则前置过滤，仅匹配的值参与 resolve |
+| `edgeType` | Yes | Edge type identifier, written to `edges.edge_type` |
+| `resolve` | Yes | Target matching: `"nodeId"` matches `pages.node_id`; `"path"` matches `pages.id` |
+| `match` | No | Regex pre-filter — only matching values participate in resolve |
 
-**设计要点**：
-
-- 只有**指向其他页面或节点**的数组字段才需要定义 edge
-- `edgeType` 应该表达语义关系（`prerequisite`, `corrects`, `bridges_from`），不是字段名
-- `resolve: "nodeId"` 适用于引用知识图谱中的概念节点
-- `resolve: "path"` 适用于引用具体的页面文件路径
-- `commonEdges`（`relatedPages`, `sourceRefs`）已全局生效，template 中不需要重复定义
+Key points:
+- Only array fields **pointing to other pages or nodes** need edge definitions
+- `edgeType` should express a semantic relationship (`prerequisite`, `corrects`, `bridges_from`), not just the field name
+- `commonEdges` (`relatedPages`, `sourceRefs`) are global — do not redefine them in templates
 
 ---
 
-## 6. SummaryFields 设计
+## SummaryFields Design
 
-`summaryFields` 中的字段值会拼接进 `pages.summary_text`，用于语义搜索和全文检索。
+Fields in `summaryFields` are concatenated into `pages.summary_text` for semantic search and full-text search.
 
 ```json
 "summaryFields": ["confidence", "masteryLevel", "prerequisites"]
 ```
 
-**设计要点**：
-
-- 选择能帮助检索的字段 — 如果知道 `domain: "环境工程"` 能帮搜索找到这个页面，就加进去
-- 不要放长文本字段，summary_text 应保持简洁
-- `defaultSummaryFields`（`title`, `tags`）自动包含，不需要重复
-- `summaryFields` 只决定是否进入 `summary_text`，不会自动注册字段；字段本身仍必须先在 `columns`、`edges` 或 `commonEdges` 中声明
+Key points:
+- Choose fields that help retrieval — e.g., `domain: "environmental engineering"` helps search find the page
+- Avoid long-text fields; `summary_text` should stay concise
+- `defaultSummaryFields` (`title`, `tags`) are included automatically
+- `summaryFields` only controls inclusion in `summary_text` — the field itself must still be declared in `columns`, `edges`, or `commonEdges`
 
 ---
 
-## 7. Body Section 设计
+## Body Section Design
 
-Body section 是模板文件中 frontmatter 之后的 Markdown 骨架，引导作者（人或 AI）写出结构化内容。
+Body sections are the Markdown skeleton after frontmatter, guiding the author (human or AI) to write structured content.
 
-**设计原则**：
+Principles:
+1. **Each section starts with `##`**
+2. **Write a specific guiding prompt** that explains the purpose and expected content
+3. **Keep section count to 3–6** — too few lacks structure, too many adds burden
+4. **Sections should have logical progression** — e.g., "what it is" → "why it matters" → "how to use it"
 
-1. **每个 section 用 `##` 标题** 开头
-2. **写一句引导性提示**，告诉作者这一节的目的和期望内容，不是模板占位符
-3. **提示语应该是具体的引导**，不是"在此处填写内容"这样的泛泛之词
-4. **Section 数量控制在 3-6 个** — 太少缺乏结构，太多增加写作负担
-5. **Section 之间应该有逻辑递进** — 比如从"是什么"到"为什么重要"到"如何使用"
-
-**好的提示语示例**：
+Good prompt example:
 
 ```markdown
-## 核心理解
+## Core Understanding
 
-用两到四句话说明这个概念到底是什么，以及它为什么值得记住。
+In two to four sentences, explain what this concept is and why it is worth remembering.
 ```
 
-**差的提示语示例**：
+Bad prompt example:
 
 ```markdown
-## 内容
+## Content
 
-<!-- 在此处填写内容 -->
+<!-- Fill in content here -->
 ```
 
 ---
 
-## 8. 完整示例
+## Complete Example
 
-假设需要设计一个 `meeting-note` 类型：
+Designing a `meeting-note` type:
 
-### 模板文件 `templates/meeting-note.md`
+### Template File `templates/meeting-note.md`
 
 ```yaml
 ---
@@ -219,24 +229,24 @@ participants: []
 decisions: []
 ---
 
-## 背景
+## Background
 
-简要说明这次会议的目的和上下文，让没参加的人能快速理解为什么开这个会。
+Briefly explain the purpose and context of this meeting so someone who did not attend can quickly understand why it was held.
 
-## 关键讨论
+## Key Discussion
 
-记录会上最重要的讨论点和不同意见，重点是分歧和最终共识，不是流水账。
+Record the most important discussion points and disagreements. Focus on conflicts and final consensus, not a chronological transcript.
 
-## 决议
+## Decisions
 
-列出会议达成的具体决定，每条决议应该是可执行的，不是模糊的方向。
+List specific decisions reached. Each decision should be actionable, not a vague direction.
 
-## 后续待办
+## Follow-up Actions
 
-列出需要跟进的行动项，标注负责人和预期完成时间。
+List action items with owners and expected completion dates.
 ```
 
-### 配置注册
+### Config Registration
 
 ```json
 "meeting-note": {
@@ -249,26 +259,25 @@ decisions: []
 }
 ```
 
-**设计决策说明**：
-
-- `meetingDate` 建列 — 需要按日期过滤查找
-- `participants` 不建列 — 查参会人用 `tiangong-wiki fts` 搜索 summary_text 即可
-- `participants` 和 `decisions` 放入 summaryFields — 帮助搜索命中
-- `decisions` 不建 edge — 决议是文本，不是指向其他页面的引用
-- Body 4 个 section — 背景 → 讨论 → 决议 → 待办，逻辑递进
+Design rationale:
+- `meetingDate` as column — needed for date-based filtering
+- `participants` not a column — searching via `tiangong-wiki fts` on summary_text is sufficient
+- `participants` and `decisions` in summaryFields — helps search hits
+- `decisions` not an edge — decisions are text, not references to other pages
+- 4 body sections — background → discussion → decisions → follow-up, logical progression
 
 ---
 
-## 9. 检查清单
+## Checklist
 
-设计完 template 后，用以下问题自检：
+After designing a template, verify:
 
-- [ ] 新 type 的结构是否与所有现有 type 都有本质差异？
-- [ ] 每个 frontmatter 字段都有明确的查询或分类用途？
-- [ ] 需要 `tiangong-wiki find` 过滤的字段都放进了 `columns`？
-- [ ] 生成 graph 边的数组字段都定义了 `edges`？
-- [ ] `summaryFields` 包含了有助于检索的关键字段？
-- [ ] 模板 frontmatter 里的每个 type-specific 字段都已在 `columns`、`edges` 或 `commonEdges` 中声明？
-- [ ] Body section 数量在 3-6 个之间，有逻辑递进？
-- [ ] Section 提示语具体而非泛泛？
-- [ ] 通过 `tiangong-wiki template create --type <type> --title <title>` 创建后，可以先跑 `tiangong-wiki template lint`，再跑 `tiangong-wiki sync` + `tiangong-wiki lint`，且都无 error？
+- [ ] The new type is structurally different from all existing types (not just topically different)?
+- [ ] Every frontmatter field has a clear querying or classification purpose?
+- [ ] Fields needing `tiangong-wiki find` filtering are in `columns`?
+- [ ] Array fields generating graph edges are defined in `edges`?
+- [ ] `summaryFields` includes key fields that aid retrieval?
+- [ ] Every type-specific frontmatter field is declared in `columns`, `edges`, or `commonEdges`?
+- [ ] Body has 3–6 sections with logical progression?
+- [ ] Section prompts are specific, not generic placeholders?
+- [ ] After creating a test page with `tiangong-wiki create --type <type> --title <title>`, both `tiangong-wiki lint` and `tiangong-wiki sync` pass with no errors?

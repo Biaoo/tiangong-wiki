@@ -22,20 +22,17 @@ The judgment layer is the agent: deciding whether knowledge is durable, which pa
 8. Run `tiangong-wiki sync --path <page-id>`.
 9. Re-run `tiangong-wiki lint --path <page-id>` when the change is localized.
 
-## PageType Selection Table
-| pageType | Use When | Typical Trigger | Notes |
-| --- | --- | --- | --- |
-| `concept` | A stable concept, model, or principle should be reusable later | New synthesis from multiple sources | Best for durable understanding |
-| `misconception` | A wrong mental model was corrected | User or agent had a clear before/after correction | Record the failure mode and prevention cues |
-| `bridge` | Knowledge transfers from one domain to another | Cross-project or cross-discipline analogy | Use when the value is the transfer itself |
-| `source-summary` | The source itself deserves a reusable digest page | A source document should remain a first-class knowledge object | Preserve `vaultPath` and `sourceType`; this is not the default destination for every vault file |
-| `lesson` | A specific incident produced a durable lesson | Failure, success, or surprise with actionable aftermath | Keep the event and future action linked |
-| `method` | A repeatable process or recipe proved useful | Same process worked more than once | Capture applicability and evidence |
-| `person` | Someone's role, preferences, or influence matters again later | Recurring collaborator or decision-maker | Keep factual and context-specific |
-| `achievement` | A milestone, credential, or verifiable result matters | Award, publication, certification, milestone | Useful for profile and reporting reuse |
-| `resume` | A reusable positioning page is needed for different audiences | Tailored summary for applications or intros | Keep it current and audience-aware |
-| `research-note` | Investigation is ongoing and incomplete | Exploratory work with open questions | Prefer this over `concept` when not settled yet |
-| `faq` | The same question recurs often | Third repeat or clear repeating pattern | Optimize for rapid reuse |
+## PageType Selection
+
+Do not assume a fixed set of page types. Always discover the current ontology at runtime:
+
+```bash
+tiangong-wiki type list --format json
+tiangong-wiki type show <type> --format json
+tiangong-wiki type recommend --text "<summary>" --keywords "a,b,c" --limit 5 --format json
+```
+
+Use `type recommend` to find the best fit for new knowledge. If no existing type fits cleanly, see `references/template-design-guide.md` for when and how to create a new type.
 
 ## Update Vs Create Decision Flow
 1. Start with a retrieval pass.
@@ -55,7 +52,7 @@ The judgment layer is the agent: deciding whether knowledge is durable, which pa
 
 ## Create Workflow
 1. Confirm no suitable active page exists.
-2. Choose the page type from the table above.
+2. Choose the page type using `tiangong-wiki type recommend` or `tiangong-wiki type list`.
 3. Run `tiangong-wiki create --type <pageType> --title "<title>" [--node-id <nodeId>]`.
 4. Open the created Markdown file and fill the frontmatter-specific fields.
 5. Fill every body section in the template with concrete content, not placeholders.
@@ -113,6 +110,9 @@ Example flow:
 ```
 
 ## Page-Type Specific Guidance
+
+> The canonical type list comes from `tiangong-wiki type list`. The tips below apply to commonly used types but may not cover all registered types.
+
 ### concept
 - Use for durable understanding, definitions, formulas, and reusable intuition.
 - Fill prerequisites, examples, confusions, and open questions.
