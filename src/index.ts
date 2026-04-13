@@ -32,12 +32,44 @@ import { embedPendingPages } from "./core/sync.js";
 import { processVaultQueueBatch } from "./core/vault-processing.js";
 import { handleCliError, writeJson } from "./utils/output.js";
 
+function extractEnvFileOption(argv: string[]): { envFile: string | null; argv: string[] } {
+  const nextArgv = argv.slice(0, 2);
+  let envFile: string | null = null;
+
+  for (let index = 2; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--env-file") {
+      const value = argv[index + 1];
+      if (!value || value.startsWith("-")) {
+        throw new Error("--env-file requires a value");
+      }
+      envFile = value;
+      index += 1;
+      continue;
+    }
+
+    if (arg.startsWith("--env-file=")) {
+      const value = arg.slice("--env-file=".length);
+      if (!value) {
+        throw new Error("--env-file requires a value");
+      }
+      envFile = value;
+      continue;
+    }
+
+    nextArgv.push(arg);
+  }
+
+  return { envFile, argv: nextArgv };
+}
+
 function buildProgram(): Command {
   const program = new Command();
   program
     .name("tiangong-wiki")
     .description("Tiangong Wiki — local-first indexing and query CLI")
     .version(packageJson.version)
+    .option("--env-file <path>", "Load runtime environment from a specific .wiki.env file")
     .showHelpAfterError();
 
   let runtimeConfig;
@@ -89,9 +121,13 @@ function buildProgram(): Command {
 }
 
 try {
+  const { envFile, argv } = extractEnvFileOption(process.argv);
+  if (envFile) {
+    process.env.WIKI_ENV_FILE = envFile;
+  }
   applyCliEnvironment(process.env, process.cwd());
   const program = buildProgram();
-  await program.parseAsync(process.argv);
+  await program.parseAsync(argv);
 } catch (error) {
   handleCliError(error);
 }

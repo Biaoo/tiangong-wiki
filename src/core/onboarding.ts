@@ -6,6 +6,7 @@ import { confirm, input, password, select } from "@inquirer/prompts";
 import { DEFAULT_WIKI_ENV_FILE, getCliEnvironmentInfo, parseEnvFile, serializeEnvEntries } from "./cli-env.js";
 import { resolveTemplateFilePath, loadConfig } from "./config.js";
 import { EmbeddingClient } from "./embedding.js";
+import { writeGlobalConfig } from "./global-config.js";
 import { parseVaultHashMode, resolveAgentSettings } from "./paths.js";
 import { loadSynologyConfigFromEnv, normalizeSynologyRemotePath, withSynologyClient } from "./synology.js";
 import {
@@ -47,6 +48,10 @@ export interface DoctorReport {
     loadedPath: string | null;
     autoDiscovered: boolean;
     missingRequestedPath: boolean;
+    missingDefaultPath: boolean;
+    source: string;
+    globalConfigPath: string | null;
+    defaultPath: string | null;
   };
   effectivePaths: {
     wikiPath: string | null;
@@ -97,6 +102,7 @@ interface SetupValues {
 
 export interface SetupResult {
   envFilePath: string;
+  globalConfigPath: string;
   createdDirectories: string[];
   copiedConfig: boolean;
   copiedTemplates: number;
@@ -1023,11 +1029,13 @@ export async function runSetupWizard(
       }),
     );
     writeSetupEnvFile(values);
+    const globalConfig = writeGlobalConfig(values.envFilePath, env);
 
     output.write(
       [
         "\ntiangong-wiki setup complete",
         `configuration file: ${values.envFilePath}`,
+        `default workspace config: ${globalConfig.configPath}`,
         `workspace root: ${workspaceRoot}`,
         `skills root: ${skillsRoot}`,
         `tiangong-wiki-skill: ${wikiSkillInstall.status}`,
@@ -1040,8 +1048,10 @@ export async function runSetupWizard(
           : []),
         "",
         "Next steps:",
-        `- Run subsequent commands from the workspace root that contains .wiki.env: ${workspaceRoot}`,
+        `- Commands inside ${JSON.stringify(workspaceRoot)} will auto-discover the local .wiki.env first.`,
+        `- Commands outside the workspace will fall back to the default workspace config at ${globalConfig.configPath}.`,
         `- Example: cd ${JSON.stringify(workspaceRoot)} && tiangong-wiki doctor`,
+        `- Example: tiangong-wiki --env-file ${JSON.stringify(values.envFilePath)} doctor`,
         `- Example: cd ${JSON.stringify(workspaceRoot)} && tiangong-wiki init`,
         "- Run `tiangong-wiki doctor` to validate the generated configuration.",
         "- Run `tiangong-wiki init` to create index.db and perform the first sync.",
@@ -1056,6 +1066,7 @@ export async function runSetupWizard(
 
     return {
       envFilePath: values.envFilePath,
+      globalConfigPath: globalConfig.configPath,
       createdDirectories: bootstrap.createdDirectories,
       copiedConfig: bootstrap.copiedConfig,
       copiedTemplates: bootstrap.copiedTemplates,
@@ -1685,20 +1696,45 @@ export async function buildDoctorReport(
       `Requested env file does not exist: ${envFile.requestedPath}`,
       "Create the env file or rerun `tiangong-wiki setup`.",
     );
+  } else if (envFile.missingDefaultPath && envFile.defaultPath) {
+    collectDoctorCheck(
+      checks,
+      "error",
+      "env-file",
+      `The default workspace config points to a missing env file: ${envFile.defaultPath}`,
+      envFile.globalConfigPath
+        ? `Fix or remove ${envFile.globalConfigPath}, rerun \`tiangong-wiki setup\`, or pass \`--env-file\` explicitly.`
+        : "Fix the default workspace config, rerun `tiangong-wiki setup`, or pass `--env-file` explicitly.",
+    );
   } else if (envFile.loadedPath) {
+    const sourceLabel =
+      envFile.source === "explicit-env-file"
+        ? "from --env-file or WIKI_ENV_FILE."
+        : envFile.source === "nearest-env-file"
+          ? "from the current workspace (auto-discovered)."
+          : envFile.source === "global-default-env-file"
+            ? "from the global default workspace config."
+            : ".";
     collectDoctorCheck(
       checks,
       "ok",
       "env-file",
-      `Loaded configuration from ${envFile.loadedPath}${envFile.autoDiscovered ? " (auto-discovered)." : "."}`,
+      `Loaded configuration from ${envFile.loadedPath} ${sourceLabel}`,
+    );
+  } else if (envFile.source === "process-env") {
+    collectDoctorCheck(
+      checks,
+      "ok",
+      "env-file",
+      "Using runtime paths provided directly via process.env; no .wiki.env file was loaded.",
     );
   } else {
     collectDoctorCheck(
       checks,
       "warn",
       "env-file",
-      "No .wiki.env file was loaded; using process.env only.",
-      "Run `tiangong-wiki setup` to generate a portable `.wiki.env` file.",
+      "No workspace configuration was found from --env-file, WIKI_ENV_FILE, the current directory, or the global default workspace config.",
+      "Run `tiangong-wiki setup`, set `WIKI_ENV_FILE`, or pass `--env-file` to point at a workspace explicitly.",
     );
   }
 
@@ -1736,6 +1772,10 @@ export async function buildDoctorReport(
       loadedPath: envFile.loadedPath,
       autoDiscovered: envFile.autoDiscovered,
       missingRequestedPath: envFile.missingRequestedPath,
+      missingDefaultPath: envFile.missingDefaultPath,
+      source: envFile.source,
+      globalConfigPath: envFile.globalConfigPath,
+      defaultPath: envFile.defaultPath,
     },
     effectivePaths: {
       wikiPath,

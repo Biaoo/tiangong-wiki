@@ -1,14 +1,26 @@
 import path from "node:path";
 
+import { readGlobalConfig } from "./global-config.js";
 import { pathExistsSync, readTextFileSync } from "../utils/fs.js";
 
 export const DEFAULT_WIKI_ENV_FILE = ".wiki.env";
+
+export type CliEnvSource =
+  | "none"
+  | "process-env"
+  | "explicit-env-file"
+  | "nearest-env-file"
+  | "global-default-env-file";
 
 export interface CliEnvInfo {
   requestedPath: string | null;
   loadedPath: string | null;
   autoDiscovered: boolean;
   missingRequestedPath: boolean;
+  missingDefaultPath: boolean;
+  source: CliEnvSource;
+  globalConfigPath: string | null;
+  defaultPath: string | null;
   loadedKeys: string[];
 }
 
@@ -17,6 +29,10 @@ const EMPTY_INFO: CliEnvInfo = {
   loadedPath: null,
   autoDiscovered: false,
   missingRequestedPath: false,
+  missingDefaultPath: false,
+  source: "none",
+  globalConfigPath: null,
+  defaultPath: null,
   loadedKeys: [],
 };
 
@@ -120,14 +136,30 @@ export function applyCliEnvironment(
   const requestedPath = requestedEnvFile ? path.resolve(cwd, requestedEnvFile) : null;
 
   if (!requestedPath && hasExplicitCoreRuntimeEnv(targetEnv)) {
-    lastCliEnvInfo = { ...EMPTY_INFO };
+    lastCliEnvInfo = { ...EMPTY_INFO, source: "process-env" };
     return lastCliEnvInfo;
   }
 
-  const candidatePath = requestedPath ?? findNearestEnvFile(cwd);
+  const nearestPath = requestedPath ? null : findNearestEnvFile(cwd);
+  const globalConfig = requestedPath || nearestPath ? null : readGlobalConfig(targetEnv);
+  const defaultPath = globalConfig ? path.resolve(globalConfig.defaultEnvFile) : null;
+  const candidatePath = requestedPath ?? nearestPath ?? defaultPath;
+  const source: CliEnvSource = requestedPath
+    ? "explicit-env-file"
+    : nearestPath
+      ? "nearest-env-file"
+      : defaultPath
+        ? "global-default-env-file"
+        : "none";
 
   if (!candidatePath) {
-    lastCliEnvInfo = { ...EMPTY_INFO, requestedPath };
+    lastCliEnvInfo = {
+      ...EMPTY_INFO,
+      requestedPath,
+      source,
+      globalConfigPath: globalConfig?.configPath ?? null,
+      defaultPath,
+    };
     return lastCliEnvInfo;
   }
 
@@ -135,8 +167,12 @@ export function applyCliEnvironment(
     lastCliEnvInfo = {
       requestedPath: candidatePath,
       loadedPath: null,
-      autoDiscovered: false,
+      autoDiscovered: source === "nearest-env-file",
       missingRequestedPath: requestedPath !== null,
+      missingDefaultPath: requestedPath === null && source === "global-default-env-file",
+      source,
+      globalConfigPath: globalConfig?.configPath ?? null,
+      defaultPath,
       loadedKeys: [],
     };
     return lastCliEnvInfo;
@@ -159,8 +195,12 @@ export function applyCliEnvironment(
   lastCliEnvInfo = {
     requestedPath,
     loadedPath: candidatePath,
-    autoDiscovered: requestedPath === null,
+    autoDiscovered: source === "nearest-env-file",
     missingRequestedPath: false,
+    missingDefaultPath: false,
+    source,
+    globalConfigPath: globalConfig?.configPath ?? null,
+    defaultPath,
     loadedKeys,
   };
   return lastCliEnvInfo;

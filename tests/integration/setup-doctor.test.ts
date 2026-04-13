@@ -66,9 +66,11 @@ describe("setup and doctor integration", () => {
   it("runs the interactive setup wizard, writes .wiki.env, and lets doctor/init reuse it automatically", () => {
     const workspace = createWorkspace();
     workspaces.push(workspace);
+    const configHome = path.join(workspace.root, ".config-home");
 
     const env = {
       ...stripWikiEnv(workspace.env),
+      XDG_CONFIG_HOME: configHome,
       PATH: [createFakeSkillsInstaller(workspace.root), process.env.PATH].filter(Boolean).join(path.delimiter),
     };
     const answers = [
@@ -99,10 +101,13 @@ describe("setup and doctor integration", () => {
 
     const envFilePath = `${workspace.root}/.wiki.env`;
     const envFile = readFile(envFilePath);
+    const globalConfigPath = setup.stdout.match(/default workspace config: (.+)/)?.[1]?.trim();
     expect(envFile).toContain("WIKI_PATH=");
     expect(envFile).toContain("VAULT_PATH=");
     expect(envFile).toContain("WIKI_AGENT_ENABLED=false");
     expect(envFile).toContain("WIKI_PARSER_SKILLS=pdf");
+    expect(globalConfigPath).toBeTruthy();
+    expect(readFile(globalConfigPath!)).toContain(realpathSync(envFilePath));
     expect(readFile(path.join(workspace.root, ".agents", "skills", "tiangong-wiki-skill", "SKILL.md"))).toContain(
       "name: tiangong-wiki-skill",
     );
@@ -112,12 +117,14 @@ describe("setup and doctor integration", () => {
     expect(doctor.status).toBe(0);
     const report = readJson<{
       ok: boolean;
-      envFile: { loadedPath: string | null };
+      envFile: { loadedPath: string | null; source: string; globalConfigPath: string | null };
       skills: { requestedParserSkills: string[]; missingSkills: string[] };
       checks: Array<{ id: string; severity: string }>;
     }>(doctor.stdout);
     expect(report.ok).toBe(true);
     expect(report.envFile.loadedPath).toBe(realpathSync(envFilePath));
+    expect(report.envFile.source).toBe("nearest-env-file");
+    expect(report.envFile.globalConfigPath).toBeNull();
     expect(report.skills.requestedParserSkills).toEqual(["pdf"]);
     expect(report.skills.missingSkills).toEqual([]);
     expect(report.checks).toEqual(
@@ -132,6 +139,27 @@ describe("setup and doctor integration", () => {
     const init = runCli(["init"], env, { cwd: workspace.root });
     expect(init.status).toBe(0);
     expect(init.stdout).toContain('"initialized": true');
+
+    const doctorFromOutside = runCli(["doctor", "--format", "json"], env, { cwd: path.dirname(workspace.root) });
+    expect(doctorFromOutside.status).toBe(0);
+    const outsideReport = readJson<{
+      ok: boolean;
+      envFile: { loadedPath: string | null; source: string; globalConfigPath: string | null };
+    }>(doctorFromOutside.stdout);
+    expect(outsideReport.ok).toBe(true);
+    expect(outsideReport.envFile.loadedPath).toBe(realpathSync(envFilePath));
+    expect(outsideReport.envFile.source).toBe("global-default-env-file");
+    expect(outsideReport.envFile.globalConfigPath).toBe(globalConfigPath);
+
+    const doctorWithExplicitEnv = runCli(["--env-file", envFilePath, "doctor", "--format", "json"], env, {
+      cwd: path.dirname(workspace.root),
+    });
+    expect(doctorWithExplicitEnv.status).toBe(0);
+    const explicitReport = readJson<{
+      envFile: { loadedPath: string | null; source: string };
+    }>(doctorWithExplicitEnv.stdout);
+    expect(explicitReport.envFile.loadedPath).toBe(path.resolve(envFilePath));
+    expect(explicitReport.envFile.source).toBe("explicit-env-file");
   });
 
   it("configures Synology vault settings during setup and lets doctor probe the NAS connection", async () => {
@@ -150,6 +178,7 @@ describe("setup and doctor integration", () => {
     servers.push(server);
 
     const env = stripWikiEnv(workspace.env);
+    env.XDG_CONFIG_HOME = path.join(workspace.root, ".config-home");
     const answers = [
       "",
       "synology",
@@ -297,6 +326,7 @@ describe("setup and doctor integration", () => {
 
     const env = {
       ...stripWikiEnv(workspace.env),
+      XDG_CONFIG_HOME: path.join(workspace.root, ".config-home"),
       PATH: [createFakeSkillsInstaller(workspace.root, "failure"), process.env.PATH].filter(Boolean).join(path.delimiter),
     };
     const answers = [
@@ -327,5 +357,37 @@ describe("setup and doctor integration", () => {
     expect(setup.stderr).toContain("failed to install skill pdf");
     expect(setup.stderr).toContain("fake installer failure");
     expect(existsSync(path.join(workspace.root, ".wiki.env"))).toBe(false);
+  });
+
+  it("explains clearly when no workspace configuration can be resolved", () => {
+    const workspace = createWorkspace();
+    workspaces.push(workspace);
+
+    const env = stripWikiEnv(workspace.env);
+    const outsideCwd = path.dirname(workspace.root);
+    const doctor = runCli(["doctor", "--format", "json"], env, {
+      cwd: outsideCwd,
+      allowFailure: true,
+    });
+    expect(doctor.status).toBe(2);
+
+    const report = readJson<{
+      envFile: { loadedPath: string | null; source: string };
+      checks: Array<{ id: string; severity: string; summary: string; recommendation?: string }>;
+      recommendations: string[];
+    }>(doctor.stdout);
+    expect(report.envFile.loadedPath).toBeNull();
+    expect(report.envFile.source).toBe("none");
+    expect(report.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "env-file",
+          severity: "warn",
+          summary: expect.stringContaining("No workspace configuration was found"),
+        }),
+      ]),
+    );
+    expect(report.recommendations.join("\n")).toContain("--env-file");
+    expect(report.recommendations.join("\n")).toContain("WIKI_ENV_FILE");
   });
 });

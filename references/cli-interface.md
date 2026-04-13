@@ -13,6 +13,13 @@ npx @biaoo/tiangong-wiki <command> [options]
 npm run dev -- <command> [options]
 ```
 
+Global workspace resolution priority:
+
+1. `--env-file <path>`
+2. `WIKI_ENV_FILE`
+3. nearest `.wiki.env` found by walking upward from the current directory
+4. the global default workspace config written by `tiangong-wiki setup`
+
 ---
 
 ## Command Overview
@@ -57,6 +64,7 @@ Interactive step-by-step wizard that:
 - Records `WIKI_PATH`, `VAULT_PATH`, `WIKI_DB_PATH`, `WIKI_CONFIG_PATH`, `WIKI_TEMPLATES_PATH`
 - Optionally configures `EMBEDDING_*` and Synology vault settings
 - Writes `.wiki.env` in the current working directory
+- Writes a global default workspace config pointing to that `.wiki.env`
 - Scaffolds `wiki/pages/`, `vault/`, `wiki.config.json`, and `templates/`
 
 After setup, run `tiangong-wiki doctor` then `tiangong-wiki init` to complete initialization.
@@ -64,11 +72,12 @@ After setup, run `tiangong-wiki doctor` then `tiangong-wiki init` to complete in
 ### doctor
 
 ```
-tiangong-wiki doctor [--probe] [--format text|json]
+tiangong-wiki doctor [--env-file <path>] [--probe] [--format text|json]
 ```
 
 | Option | Description |
 | --- | --- |
+| `--env-file` | Load a specific `.wiki.env` before running the command |
 | `--probe` | Additionally test remote services (embedding endpoint, Synology NAS) |
 | `--format` | Output format: `text` (default) or `json` |
 

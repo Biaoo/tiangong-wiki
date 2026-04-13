@@ -61,7 +61,14 @@ tiangong-wiki init                                    # initialize workspace
 tiangong-wiki sync                                    # index Markdown pages
 ```
 
-`tiangong-wiki setup` creates `.wiki.env`. Subsequent commands such as `doctor`, `init`, and `sync` should be run from the workspace root containing that `.wiki.env`, or with `WIKI_ENV_FILE` pointing to it explicitly.
+`tiangong-wiki setup` creates a workspace-local `.wiki.env` and records it as your default workspace config. Command resolution now follows this order:
+
+1. `--env-file <path>`
+2. `WIKI_ENV_FILE`
+3. The nearest `.wiki.env` found by walking upward from your current directory
+4. The global default workspace config written by `tiangong-wiki setup`
+
+That means commands still work best from inside a workspace, but they can also run from outside the workspace after setup, or target a specific workspace explicitly with `--env-file`.
 
 ```bash
 tiangong-wiki find --type concept --status active     # structured query
@@ -75,7 +82,7 @@ tiangong-wiki daemon run                              # start dashboard & HTTP A
 tiangong-wiki dashboard                               # open dashboard in browser
 ```
 
-> Environment variables are managed via `.wiki.env` (created by `tiangong-wiki setup`). The CLI auto-discovers the nearest `.wiki.env` by walking upward from your current directory. See [references/troubleshooting.md](./references/troubleshooting.md) for the full reference.
+> Environment variables are managed via `.wiki.env` (created by `tiangong-wiki setup`). The CLI prefers the nearest local `.wiki.env`, then falls back to the global default workspace config. See [references/troubleshooting.md](./references/troubleshooting.md) for the full reference.
 
 ## CLI
 
