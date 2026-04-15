@@ -208,6 +208,7 @@ export function resolveRuntimePaths(env: NodeJS.ProcessEnv = process.env): Runti
     daemonPidPath: path.join(wikiRoot, ".wiki-daemon.pid"),
     daemonLogPath: path.join(wikiRoot, ".wiki-daemon.log"),
     daemonStatePath: path.join(wikiRoot, ".wiki-daemon.state.json"),
+    auditLogPath: path.join(wikiRoot, "..", ".wiki-runtime", "audit.ndjson"),
   };
 }
 

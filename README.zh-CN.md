@@ -99,7 +99,112 @@ tiangong-wiki dashboard                               # 在浏览器中打开仪
 # 或者：tiangong-wiki daemon run                      # 前台运行 daemon，适合调试
 ```
 
-> 环境变量通过 `.wiki.env` 管理（由 `tiangong-wiki setup` 创建）。CLI 会优先使用最近的本地 `.wiki.env`，找不到时再 fallback 到全局默认工作区配置。完整参考见 [references/troubleshooting.md](./references/troubleshooting.md)。
+> 环境变量通过 `.wiki.env` 管理（由 `tiangong-wiki setup` 创建）。CLI 会优先使用最近的本地 `.wiki.env`，找不到时再 fallback 到全局默认工作区配置。完整参考见 [references/troubleshooting.md](./references/troubleshooting.md)。如需部署中心化服务（Linux + `systemd` + Nginx），见 [references/centralized-service-deployment.md](./references/centralized-service-deployment.md)。该部署文档现在也包含了 Git 仓库初始化、GitHub remote 配置和 daemon 自动 push 的 Git 配置说明。
+
+## MCP Server
+
+Tiangong Wiki 提供了独立的 MCP 适配层，通过 HTTP 调用 daemon。它使用的是 MCP 的 Streamable HTTP 传输，不是 stdio。
+
+启动 MCP 前，先确保 daemon 已经在监听：
+
+```bash
+tiangong-wiki daemon run
+```
+
+另开一个终端：
+
+```bash
+export WIKI_DAEMON_BASE_URL=http://127.0.0.1:8787
+export WIKI_MCP_HOST=127.0.0.1
+export WIKI_MCP_PORT=9400
+export WIKI_MCP_PATH=/mcp
+
+tiangong-wiki-mcp-server
+```
+
+启动后会输出一行 JSON，例如：
+
+```json
+{"status":"listening","host":"127.0.0.1","port":9400,"healthUrl":"http://127.0.0.1:9400/health","mcpUrl":"http://127.0.0.1:9400/mcp"}
+```
+
+如果你不是通过全局安装使用，而是在源码仓库里运行：
+
+```bash
+npm install
+npm run build
+
+WIKI_DAEMON_BASE_URL=http://127.0.0.1:8787 \
+WIKI_MCP_PORT=9400 \
+node mcp-server/dist/index.js
+
+# 或者开发态运行
+npm run dev:mcp-server
+```
+
+MCP 侧需要的环境变量：
+
+- `WIKI_DAEMON_BASE_URL`：wiki daemon 的 base URL，例如 `http://127.0.0.1:8787`
+- `WIKI_MCP_HOST`：MCP HTTP 服务绑定地址，默认 `127.0.0.1`
+- `WIKI_MCP_PORT`：MCP HTTP 服务绑定端口，默认随机空闲端口
+- `WIKI_MCP_PATH`：MCP 路由路径，默认 `/mcp`
+
+Bearer token 说明：
+
+- Bearer token 不配置在 `.wiki.env`、daemon env 或 MCP env 里
+- 当前 V1 部署模型里，Bearer token 配在反向代理层
+- 具体示例见 [references/examples/centralized-service/nginx-centralized-wiki.conf](./references/examples/centralized-service/nginx-centralized-wiki.conf) 中的 `map $http_authorization ...`
+- 生产环境建议把 token 放在私有的 Nginx include 文件中，例如 `/etc/nginx/snippets/wiki-auth-tokens.conf`，再由主站点配置 `include` 进来，不要把真实密钥硬编码在仓库示例里
+
+## 客户端如何使用这个 MCP
+
+任何支持 Streamable HTTP 的 MCP client 都可以连接到这个服务：
+
+- 本地调试地址：`http://127.0.0.1:9400/mcp`
+- 健康检查：`http://127.0.0.1:9400/health`
+- 生产环境建议：对外只暴露反向代理后的 `/mcp`，daemon 和 MCP 自身只监听 loopback
+
+读工具可以直接调用。写工具，如 `wiki_page_create`、`wiki_page_update`、`wiki_sync`，额外要求这些 header：
+
+- `x-wiki-actor-id`
+- `x-wiki-actor-type`
+- `x-request-id`
+
+生产环境推荐模式是：客户端只向反向代理发送 `Authorization: Bearer ...`，由反向代理在代理层完成 token 校验，并在转发到 MCP server 前注入 actor headers。若你在本地直接连 MCP 做调试，则需要由客户端自己带上这些 header 才能调用写工具。
+
+最小 Node.js MCP client 示例：
+
+```ts
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+
+const transport = new StreamableHTTPClientTransport(new URL("http://127.0.0.1:9400/mcp"), {
+  requestInit: {
+    headers: {
+      "x-wiki-actor-id": "agent:demo",
+      "x-wiki-actor-type": "agent",
+      "x-request-id": "req-demo-1",
+    },
+  },
+});
+
+const client = new Client({ name: "demo-client", version: "1.0.0" });
+await client.connect(transport);
+
+const tools = await client.listTools();
+const search = await client.callTool({
+  name: "wiki_search",
+  arguments: { query: "bayes", limit: 5 },
+});
+```
+
+当前 MCP tools 包括：
+
+- 查询：`wiki_find`、`wiki_fts`、`wiki_search`、`wiki_graph`
+- 页面：`wiki_page_info`、`wiki_page_read`、`wiki_page_create`、`wiki_page_update`
+- 类型：`wiki_type_list`、`wiki_type_show`、`wiki_type_recommend`
+- Vault：`wiki_vault_list`、`wiki_vault_queue`
+- 维护：`wiki_sync`、`wiki_lint`
 
 ## CLI
 

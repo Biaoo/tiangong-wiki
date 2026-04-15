@@ -1,12 +1,17 @@
 import type { CodexWorkflowRunner } from "../core/codex-workflow.js";
 import { getTemplate } from "../core/config.js";
 import { resolveAgentSettings } from "../core/paths.js";
+import { normalizePageId } from "../core/paths.js";
 import { createPageFromTemplate } from "../core/page-files.js";
+import { updatePageById } from "../core/page-files.js";
+import { readCanonicalPageSourceById, type CanonicalPageSource } from "../core/page-source.js";
 import { loadRuntimeConfig } from "../core/runtime.js";
+import { openRuntimeDb } from "../core/runtime.js";
 import { syncWorkspace, type SyncOptions } from "../core/sync.js";
 import { getVaultQueueItem, processVaultQueueBatch, type QueueProcessResult } from "../core/vault-processing.js";
+import { selectPageById } from "../core/query.js";
 import type { SyncResult, VaultQueueStatus } from "../types/page.js";
-import { AppError } from "../utils/errors.js";
+import { AppError, asAppError } from "../utils/errors.js";
 
 export interface CreatePageOptions {
   type: string;
@@ -20,6 +25,13 @@ export interface RunSyncCommandOptions extends Omit<SyncOptions, "env"> {
   workflowRunner?: CodexWorkflowRunner;
 }
 
+export interface UpdatePageOptions {
+  pageId: string;
+  bodyMarkdown?: string;
+  frontmatterPatch?: Record<string, unknown>;
+  ifRevision?: string;
+}
+
 export type QueueProcessNoopReason = "already_done" | "already_skipped" | null;
 
 export interface SyncQueueProcessResult extends Omit<QueueProcessResult, "enabled"> {
@@ -31,6 +43,10 @@ export interface SyncQueueProcessResult extends Omit<QueueProcessResult, "enable
 
 export interface SyncCommandResult extends SyncResult {
   queueProcess: SyncQueueProcessResult | null;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Object.prototype.toString.call(value) === "[object Object]";
 }
 
 function assertValidSyncCommandOptions(options: RunSyncCommandOptions): void {
@@ -203,13 +219,104 @@ export async function createPage(
     title: options.title,
     nodeId: options.nodeId ?? undefined,
   });
-  await syncWorkspace({
-    env,
-    targetPaths: [created.pageId],
-  });
+  try {
+    await syncWorkspace({
+      env,
+      targetPaths: [created.pageId],
+    });
+  } catch (error) {
+    const appError = asAppError(error);
+    throw new AppError(`Sync failed after creating page: ${created.pageId}`, "runtime", {
+      code: "sync_failed",
+      pageId: created.pageId,
+      filePath: created.filePath,
+      revisionAfter: readCanonicalPageSourceById(created.pageId, paths.wikiPath, config).revision,
+      cause: appError.message,
+    });
+  }
 
   return {
     created: created.pageId,
     filePath: created.filePath,
   };
+}
+
+export async function updatePage(
+  env: NodeJS.ProcessEnv = process.env,
+  options: UpdatePageOptions,
+): Promise<CanonicalPageSource> {
+  const pageIdInput = typeof options.pageId === "string" ? options.pageId.trim() : "";
+  if (!pageIdInput) {
+    throw new AppError("pageId is required.", "config", {
+      code: "invalid_request",
+      field: "pageId",
+    });
+  }
+
+  const hasBodyMarkdown = typeof options.bodyMarkdown === "string";
+  const hasFrontmatterPatch =
+    options.frontmatterPatch !== undefined &&
+    isPlainObject(options.frontmatterPatch) &&
+    Object.keys(options.frontmatterPatch).length > 0;
+
+  if (options.frontmatterPatch !== undefined && !isPlainObject(options.frontmatterPatch)) {
+    throw new AppError("frontmatterPatch must be an object.", "config", {
+      code: "invalid_request",
+      field: "frontmatterPatch",
+    });
+  }
+
+  if (!hasBodyMarkdown && !hasFrontmatterPatch) {
+    throw new AppError("bodyMarkdown or frontmatterPatch is required.", "config", {
+      code: "invalid_request",
+    });
+  }
+
+  const { db, config, paths } = openRuntimeDb(env);
+  let canonicalPageId: string;
+  try {
+    const normalizedPageId = normalizePageId(pageIdInput, paths.wikiPath);
+    const page = selectPageById(db, config, normalizedPageId);
+    if (!page) {
+      throw new AppError(`Page not found: ${normalizedPageId}`, "not_found");
+    }
+    canonicalPageId = String(page.id);
+  } finally {
+    db.close();
+  }
+
+  const currentSource = readCanonicalPageSourceById(canonicalPageId, paths.wikiPath, config);
+  const expectedRevision =
+    typeof options.ifRevision === "string" && options.ifRevision.trim() ? options.ifRevision.trim() : null;
+  if (expectedRevision && currentSource.revision !== expectedRevision) {
+    throw new AppError(`Page revision conflict: ${canonicalPageId}`, "runtime", {
+      code: "revision_conflict",
+      pageId: canonicalPageId,
+      ifRevision: expectedRevision,
+      currentRevision: currentSource.revision,
+    });
+  }
+
+  updatePageById(paths, canonicalPageId, {
+    bodyMarkdown: hasBodyMarkdown ? options.bodyMarkdown : undefined,
+    frontmatterPatch: hasFrontmatterPatch ? options.frontmatterPatch : undefined,
+  });
+
+  try {
+    await syncWorkspace({
+      env,
+      targetPaths: [canonicalPageId],
+    });
+  } catch (error) {
+    const appError = asAppError(error);
+    throw new AppError(`Sync failed after updating page: ${canonicalPageId}`, "runtime", {
+      code: "sync_failed",
+      pageId: canonicalPageId,
+      revisionBefore: currentSource.revision,
+      revisionAfter: readCanonicalPageSourceById(canonicalPageId, paths.wikiPath, config).revision,
+      cause: appError.message,
+    });
+  }
+
+  return readCanonicalPageSourceById(canonicalPageId, paths.wikiPath, config);
 }

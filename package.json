@@ -16,11 +16,13 @@
   },
   "license": "MIT",
   "bin": {
-    "tiangong-wiki": "./dist/index.js"
+    "tiangong-wiki": "./dist/index.js",
+    "tiangong-wiki-mcp-server": "./mcp-server/dist/index.js"
   },
   "main": "./dist/index.js",
   "files": [
     "dist",
+    "mcp-server/dist",
     "assets",
     "references",
     "agents",
@@ -30,12 +32,14 @@
     "node": ">=18"
   },
   "scripts": {
-    "build": "npm run build:cli && npm run build:dashboard",
+    "build": "npm run build:cli && npm run build:dashboard && npm run build:mcp-server",
     "build:cli": "tsc -p tsconfig.json",
     "build:dashboard": "vite build --config dashboard/vite.config.ts",
-    "clean": "rm -rf dist node_modules/.vitest node_modules/.vite",
+    "build:mcp-server": "tsc -p mcp-server/tsconfig.json",
+    "clean": "rm -rf dist mcp-server/dist node_modules/.vitest node_modules/.vite",
     "dev": "tsx src/index.ts",
     "dev:dashboard": "vite --config dashboard/vite.config.ts",
+    "dev:mcp-server": "tsx mcp-server/src/index.ts",
     "test": "npm run build && vitest run",
     "test:watch": "vitest"
   },
@@ -44,13 +48,15 @@
     "@fontsource/jetbrains-mono": "^5.2.8",
     "@fontsource/space-grotesk": "^5.2.10",
     "@inquirer/prompts": "^7.10.1",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@openai/codex-sdk": "^0.118.0",
     "adm-zip": "^0.5.17",
     "better-sqlite3": "^12.8.0",
     "commander": "^14.0.3",
     "gray-matter": "^4.0.3",
     "preact": "^10.29.1",
-    "sqlite-vec": "^0.1.9"
+    "sqlite-vec": "^0.1.9",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@preact/preset-vite": "^2.10.5",

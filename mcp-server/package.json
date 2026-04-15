@@ -1,0 +1,20 @@
+{
+  "name": "@biaoo/tiangong-wiki-mcp-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Thin MCP adapter for the Tiangong Wiki daemon.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": {
+    "tiangong-wiki-mcp-server": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "node ../node_modules/typescript/bin/tsc -p tsconfig.json",
+    "dev": "node ../node_modules/tsx/dist/cli.mjs src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^4.3.6"
+  }
+}

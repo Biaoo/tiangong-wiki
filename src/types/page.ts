@@ -285,6 +285,7 @@ export interface RuntimePaths {
   daemonPidPath: string;
   daemonLogPath: string;
   daemonStatePath: string;
+  auditLogPath: string;
 }
 
 export type DaemonLaunchMode = "run" | "start";
@@ -294,9 +295,62 @@ export type DaemonTask =
   | "sync-trigger"
   | "cycle"
   | "create"
+  | "update"
   | "queue-retry"
   | "template-create"
   | "shutdown";
+
+export type DaemonWriteJobStatus = "queued" | "running" | "succeeded" | "failed" | "timed_out";
+
+export interface DaemonWriteJobSnapshot {
+  jobId: string;
+  taskType: DaemonTask;
+  status: DaemonWriteJobStatus;
+  enqueuedAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  durationMs: number | null;
+  timeoutMs: number;
+  queueDepthAtEnqueue: number;
+  positionInQueue: number | null;
+  resultSummary: Record<string, unknown> | null;
+  errorMessage: string | null;
+  errorDetails: Record<string, unknown> | null;
+}
+
+export interface DaemonWriteQueueSummary {
+  limits: {
+    maxDepth: number;
+    jobTimeoutMs: number;
+  };
+  counts: {
+    queued: number;
+    running: number;
+    recent: number;
+  };
+  activeJob: DaemonWriteJobSnapshot | null;
+  queuedJobs: DaemonWriteJobSnapshot[];
+  recentJobs: DaemonWriteJobSnapshot[];
+  generatedAt: string;
+}
+
+export interface WriteActorMetadata {
+  actorId: string;
+  actorType: string;
+  requestId: string;
+}
+
+export interface DaemonWriteMeta {
+  requestId: string;
+  actorId: string;
+  actorType: string;
+  auditLogPath: string;
+  git: {
+    status: "committed" | "no_changes" | "degraded";
+    commitHash: string | null;
+    pushScheduled: boolean;
+  };
+}
 
 export interface DaemonState {
   pid: number;

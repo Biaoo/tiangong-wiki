@@ -6,6 +6,7 @@ import { runSyncCommand, type SyncCommandResult } from "../../src/operations/wri
 import {
   cleanupWorkspace,
   createWorkspace,
+  initializeGitRepo,
   runCli,
   runCliJson,
   waitFor,
@@ -213,6 +214,7 @@ describe("sync --process", () => {
     workspaces.push(workspace);
 
     runCli(["init"], workspace.env);
+    initializeGitRepo(workspace);
     writeVaultFile(workspace, "imports/spec.pdf", "Durable spec content.");
     writeVaultFile(workspace, "imports/notes.md", "# Notes\n\nDurable notes.");
 

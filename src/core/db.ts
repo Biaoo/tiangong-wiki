@@ -176,6 +176,25 @@ function ensureBaseTables(db: Database.Database, embeddingDimensions: number): v
       key TEXT PRIMARY KEY,
       value TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS daemon_write_jobs (
+      job_id TEXT PRIMARY KEY,
+      task_type TEXT NOT NULL,
+      status TEXT NOT NULL,
+      enqueued_at TEXT NOT NULL,
+      started_at TEXT,
+      finished_at TEXT,
+      duration_ms INTEGER,
+      timeout_ms INTEGER NOT NULL,
+      queue_depth_at_enqueue INTEGER NOT NULL DEFAULT 0,
+      result_summary TEXT,
+      error_message TEXT,
+      error_details TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_daemon_write_jobs_status ON daemon_write_jobs(status);
+    CREATE INDEX IF NOT EXISTS idx_daemon_write_jobs_enqueued_at ON daemon_write_jobs(enqueued_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_daemon_write_jobs_finished_at ON daemon_write_jobs(finished_at DESC);
   `);
 
   ensureTableColumns(db, "vault_processing_queue", {
