@@ -160,6 +160,80 @@ V1 decision:
 
 ---
 
+## Git Repository Setup
+
+The centralized service assumes the wiki workspace itself is a real Git repository.
+
+Current behavior:
+
+- every successful write attempts a local Git commit
+- optional remote push is triggered asynchronously when `WIKI_GIT_AUTO_PUSH=true`
+- push failure does not roll back a successful local write
+
+Initialize the workspace repo:
+
+```bash
+cd /srv/tiangong-wiki/workspace
+
+git init -b main
+git config user.name "tiangong-wiki"
+git config user.email "tiangong-wiki@local"
+```
+
+Notes:
+
+- daemon-generated commits override author/committer identity from the write actor
+- the local repo still should have basic Git config for operator workflows
+
+Configure the GitHub remote:
+
+```bash
+cd /srv/tiangong-wiki/workspace
+git remote add origin git@github.com:YOUR_ORG/YOUR_REPO.git
+git remote -v
+```
+
+If the remote already exists:
+
+```bash
+git remote set-url origin git@github.com:YOUR_ORG/YOUR_REPO.git
+```
+
+Recommended authentication model:
+
+- run the daemon as a dedicated system user such as `tiangong-wiki`
+- give that user an SSH key dedicated to this deployment
+- register the public key in GitHub as a deploy key, bot account key, or GitHub App-managed key
+
+Example SSH bootstrap:
+
+```bash
+sudo -u tiangong-wiki mkdir -p /home/tiangong-wiki/.ssh
+sudo -u tiangong-wiki ssh-keygen -t ed25519 -f /home/tiangong-wiki/.ssh/id_ed25519 -N ""
+sudo -u tiangong-wiki ssh-keyscan github.com >> /home/tiangong-wiki/.ssh/known_hosts
+chmod 600 /home/tiangong-wiki/.ssh/known_hosts
+```
+
+Do not store GitHub personal access tokens in `centralized.env`. Prefer SSH deploy keys.
+
+Before enabling daemon-side auto push, verify Git access as the actual service user:
+
+```bash
+sudo -u tiangong-wiki git -C /srv/tiangong-wiki/workspace status
+sudo -u tiangong-wiki git -C /srv/tiangong-wiki/workspace remote -v
+sudo -u tiangong-wiki git -C /srv/tiangong-wiki/workspace push origin HEAD
+```
+
+If this manual push fails, daemon-side auto push will fail too.
+
+Operational constraints:
+
+- do not leave unrelated unstaged changes in the workspace repo
+- ensure the target branch policy matches service behavior if you enable auto push
+- if GitHub branch protection forbids direct push to the target branch, the current V1 service should push to an allowed branch or keep auto push disabled
+
+---
+
 ## `systemd` Units
 
 Example unit files are provided under [references/examples/centralized-service/](./examples/centralized-service/).
