@@ -1,0 +1,18 @@
+[Unit]
+Description=Tiangong Wiki MCP adapter
+After=network-online.target tiangong-wiki-daemon.service
+Wants=network-online.target
+Requires=tiangong-wiki-daemon.service
+
+[Service]
+Type=simple
+User=tiangong-wiki
+Group=tiangong-wiki
+WorkingDirectory=/srv/tiangong-wiki/current
+EnvironmentFile=/etc/tiangong-wiki/centralized.env
+ExecStart=/usr/bin/env node /srv/tiangong-wiki/current/mcp-server/dist/index.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

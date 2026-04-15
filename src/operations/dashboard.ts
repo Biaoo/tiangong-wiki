@@ -5,6 +5,7 @@ import { getMeta } from "../core/db.js";
 import { parsePage } from "../core/frontmatter.js";
 import { buildDoctorReport } from "../core/onboarding.js";
 import { resolveRuntimePaths } from "../core/paths.js";
+import { readCanonicalPageSource } from "../core/page-source.js";
 import { compactPageSummary } from "../core/presenters.js";
 import { listPageColumns, mapPageRow, selectPageById } from "../core/query.js";
 import { openRuntimeDb } from "../core/runtime.js";
@@ -1073,17 +1074,11 @@ export async function getDashboardPageSource(
     }
 
     const pageFilePath = path.join(paths.wikiPath, ...String(page.id).split("/"));
-    const parsed = parsePage(pageFilePath, paths.wikiPath, config);
-    const rawData = parsed.ok ? parsed.parsed.rawData : {};
+    const pageSource = readCanonicalPageSource(pageFilePath, paths.wikiPath, config);
 
     return {
-      pageSource: {
-        pageId: String(page.id),
-        pagePath: pageFilePath,
-        rawMarkdown: readOptionalText(pageFilePath),
-        frontmatter: rawData,
-      },
-      vaultSource: await resolvePageVaultSource(db, config, env, page, rawData),
+      pageSource,
+      vaultSource: await resolvePageVaultSource(db, config, env, page, pageSource.frontmatter),
       generatedAt: toOffsetIso(),
     };
   } finally {

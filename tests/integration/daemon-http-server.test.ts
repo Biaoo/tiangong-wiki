@@ -10,11 +10,14 @@ import {
   cleanupWorkspace,
   createWorkspace,
   distCliPath,
+  initializeGitRepo,
   projectRoot,
   readFile,
   readJson,
+  runGit,
   runCli,
   runCliJson,
+  startEmbeddingServer,
   waitFor,
   writePage,
   writeVaultFile,
@@ -49,11 +52,84 @@ interface DaemonStatusPayload {
   state: DaemonStatePayload | null;
 }
 
+interface PageReadPayload {
+  pageId: string;
+  pagePath: string;
+  rawMarkdown: string | null;
+  frontmatter: Record<string, unknown>;
+  revision: string | null;
+}
+
+interface WriteQueueJobPayload {
+  jobId: string;
+  taskType: string;
+  status: string;
+  enqueuedAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  durationMs: number | null;
+  timeoutMs: number;
+  queueDepthAtEnqueue: number;
+  positionInQueue: number | null;
+  resultSummary: Record<string, unknown> | null;
+  errorMessage: string | null;
+  errorDetails: Record<string, unknown> | null;
+}
+
+interface WriteQueueSummaryPayload {
+  limits: { maxDepth: number; jobTimeoutMs: number };
+  counts: { queued: number; running: number; recent: number };
+  activeJob: WriteQueueJobPayload | null;
+  queuedJobs: WriteQueueJobPayload[];
+  recentJobs: WriteQueueJobPayload[];
+  generatedAt: string;
+}
+
 interface ForegroundDaemonHandle {
   child: ChildProcess;
   waitForExit: () => Promise<void>;
   stop: () => Promise<void>;
   logs: () => string;
+}
+
+interface WriteMetaPayload {
+  requestId: string;
+  actorId: string;
+  actorType: string;
+  auditLogPath: string;
+  git: {
+    status: "committed" | "no_changes" | "degraded";
+    commitHash: string | null;
+    pushScheduled: boolean;
+  };
+}
+
+let writeRequestCounter = 0;
+
+function initializeDaemonWorkspace(workspace: Workspace, options: { git?: boolean } = {}): void {
+  runCli(["init"], workspace.env);
+  if (options.git !== false) {
+    initializeGitRepo(workspace);
+  }
+}
+
+function buildWriteActor(
+  overrides: Partial<{ actorId: string; actorType: string; requestId: string }> = {},
+): { actorId: string; actorType: string; requestId: string } {
+  writeRequestCounter += 1;
+  return {
+    actorId: overrides.actorId ?? "user:test-client",
+    actorType: overrides.actorType ?? "user",
+    requestId: overrides.requestId ?? `req:test-${writeRequestCounter}`,
+  };
+}
+
+function readAuditEvents(auditLogPath: string): Array<Record<string, unknown>> {
+  return readFile(auditLogPath)
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => readJson<Record<string, unknown>>(line));
 }
 
 function daemonStatePath(workspace: Workspace): string {
@@ -222,8 +298,13 @@ describe("daemon HTTP server integration", () => {
   const workspaces: Workspace[] = [];
   const foregroundDaemons: ForegroundDaemonHandle[] = [];
   const childProcesses: ChildProcess[] = [];
+  const servers: Array<{ close: () => Promise<void> }> = [];
 
   afterEach(async () => {
+    while (servers.length > 0) {
+      await servers.pop()!.close();
+    }
+
     while (foregroundDaemons.length > 0) {
       await foregroundDaemons.pop()!.stop();
     }
@@ -248,7 +329,7 @@ describe("daemon HTTP server integration", () => {
       WIKI_SYNC_INTERVAL: "0",
     });
     workspaces.push(workspace);
-    runCli(["init"], workspace.env);
+    initializeDaemonWorkspace(workspace);
 
     const daemon = await startForegroundDaemon(workspace);
     foregroundDaemons.push(daemon);
@@ -301,14 +382,12 @@ describe("daemon HTTP server integration", () => {
     expect(sync.status).toBe(200);
     expect(["full", "incremental"]).toContain(sync.payload.mode);
 
-    const trigger = await fetchDaemonJson<{ status: string; currentTask: string }>(workspace, "/sync/trigger", {
+    const trigger = await fetchDaemonJson<{ status: string; task: string }>(workspace, "/sync/trigger", {
       method: "POST",
     });
     expect(trigger.status).toBe(200);
-    expect(trigger.payload).toEqual({
-      status: "started",
-      currentTask: "sync-trigger",
-    });
+    expect(trigger.payload.status).toBe("started");
+    expect((trigger.payload.task ?? (trigger.payload as { currentTask?: string }).currentTask)).toBe("sync-trigger");
 
     await waitFor(async () => {
       const status = await fetchDaemonJson<DaemonStatusPayload>(workspace, "/status");
@@ -340,7 +419,7 @@ describe("daemon HTTP server integration", () => {
       WIKI_DAEMON_PORT: String(fixedPort),
     });
     workspaces.push(workspace);
-    runCli(["init"], workspace.env);
+    initializeDaemonWorkspace(workspace);
 
     const started = runCliJson<{ status: string; pid: number }>(["daemon", "start"], workspace.env);
     expect(started.status).toBe("started");
@@ -371,7 +450,7 @@ describe("daemon HTTP server integration", () => {
       WIKI_SYNC_INTERVAL: "0",
     });
     workspaces.push(workspace);
-    runCli(["init"], workspace.env);
+    initializeDaemonWorkspace(workspace);
 
     const payload = runCliJson<{
       url: string;
@@ -395,10 +474,565 @@ describe("daemon HTTP server integration", () => {
     expect(await response.text()).toContain("Tiangong Wiki");
   });
 
+  it("reads canonical page source and updates pages with revision conflict checks", async () => {
+    const workspace = createWorkspace({
+      WIKI_SYNC_INTERVAL: "0",
+    });
+    workspaces.push(workspace);
+    initializeDaemonWorkspace(workspace);
+
+    const daemon = await startForegroundDaemon(workspace);
+    foregroundDaemons.push(daemon);
+
+    const created = await fetchDaemonJson<{ created: string; filePath: string }>(workspace, "/create", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        type: "concept",
+        title: "Centralized Update Target",
+      }),
+    });
+    expect(created.status).toBe(200);
+
+    const pageRead = await fetchDaemonJson<PageReadPayload>(
+      workspace,
+      `/page-read?pageId=${encodeURIComponent(created.payload.created)}`,
+    );
+    expect(pageRead.status).toBe(200);
+    expect(pageRead.payload.pageId).toBe(created.payload.created);
+    expect(pageRead.payload.rawMarkdown).toContain("Centralized Update Target");
+    expect(pageRead.payload.frontmatter.title).toBe("Centralized Update Target");
+    expect(pageRead.payload.revision).toMatch(/^[0-9a-f]{64}$/);
+
+    const dashboardSource = await fetchDaemonJson<{
+      pageSource: PageReadPayload;
+    }>(workspace, `/api/dashboard/pages/${encodeURIComponent(created.payload.created)}/source`);
+    expect(dashboardSource.status).toBe(200);
+    expect(dashboardSource.payload.pageSource).toMatchObject(pageRead.payload);
+
+    const bodyUpdate = await fetchDaemonJson<PageReadPayload>(workspace, "/page-update", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        pageId: created.payload.created,
+        bodyMarkdown: "Updated body line.\n\nSecond paragraph.\n",
+        ifRevision: pageRead.payload.revision,
+      }),
+    });
+    expect(bodyUpdate.status).toBe(200);
+    expect(bodyUpdate.payload.rawMarkdown).toContain("Updated body line.");
+    expect(bodyUpdate.payload.revision).not.toBe(pageRead.payload.revision);
+
+    const frontmatterUpdate = await fetchDaemonJson<PageReadPayload>(workspace, "/page-update", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        pageId: created.payload.created,
+        frontmatterPatch: {
+          status: "active",
+          tags: ["centralized", "mcp"],
+        },
+        ifRevision: bodyUpdate.payload.revision,
+      }),
+    });
+    expect(frontmatterUpdate.status).toBe(200);
+    expect(frontmatterUpdate.payload.frontmatter.status).toBe("active");
+    expect(frontmatterUpdate.payload.frontmatter.tags).toEqual(["centralized", "mcp"]);
+    expect(frontmatterUpdate.payload.revision).not.toBe(bodyUpdate.payload.revision);
+
+    const persisted = await fetchDaemonJson<PageReadPayload>(
+      workspace,
+      `/page-read?pageId=${encodeURIComponent(created.payload.created)}`,
+    );
+    expect(persisted.status).toBe(200);
+    expect(persisted.payload.rawMarkdown).toContain("Updated body line.");
+    expect(persisted.payload.frontmatter.status).toBe("active");
+    expect(persisted.payload.frontmatter.tags).toEqual(["centralized", "mcp"]);
+    expect(persisted.payload.revision).toBe(frontmatterUpdate.payload.revision);
+
+    const emptyUpdate = await fetchDaemonJson<{
+      error: string;
+      type: string;
+      details?: { code?: string };
+    }>(workspace, "/page-update", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        pageId: created.payload.created,
+        ifRevision: persisted.payload.revision,
+      }),
+    });
+    expect(emptyUpdate.status).toBe(400);
+    expect(emptyUpdate.payload.details?.code).toBe("invalid_request");
+
+    const staleUpdate = await fetchDaemonJson<{
+      error: string;
+      type: string;
+      details?: { code?: string; currentRevision?: string | null };
+    }>(workspace, "/page-update", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        pageId: created.payload.created,
+        bodyMarkdown: "Stale content attempt.\n",
+        ifRevision: bodyUpdate.payload.revision,
+      }),
+    });
+    expect(staleUpdate.status).toBe(409);
+    expect(staleUpdate.payload.details?.code).toBe("revision_conflict");
+    expect(staleUpdate.payload.details?.currentRevision).toBe(frontmatterUpdate.payload.revision);
+  });
+
+  it("records actor metadata, audit events, and Git commit hash for successful writes", async () => {
+    const workspace = createWorkspace({
+      WIKI_SYNC_INTERVAL: "0",
+    });
+    workspaces.push(workspace);
+    initializeDaemonWorkspace(workspace);
+
+    const daemon = await startForegroundDaemon(workspace);
+    foregroundDaemons.push(daemon);
+
+    const actor = buildWriteActor({
+      actorId: "agent:test-runner",
+      actorType: "agent",
+    });
+    const created = await fetchDaemonJson<{
+      created: string;
+      filePath: string;
+      writeMeta: WriteMetaPayload;
+    }>(workspace, "/create", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        actor,
+        type: "concept",
+        title: "Audited Create Target",
+      }),
+    });
+    expect(created.status).toBe(200);
+    expect(created.payload.writeMeta).toEqual(
+      expect.objectContaining({
+        requestId: actor.requestId,
+        actorId: actor.actorId,
+        actorType: actor.actorType,
+        git: expect.objectContaining({
+          status: "committed",
+          commitHash: expect.stringMatching(/^[0-9a-f]{40}$/),
+        }),
+      }),
+    );
+
+    const auditEvents = readAuditEvents(created.payload.writeMeta.auditLogPath).filter(
+      (event) => event.requestId === actor.requestId,
+    );
+    expect(auditEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actorId: actor.actorId,
+          actorType: actor.actorType,
+          operation: "create",
+          resourceId: created.payload.created,
+          status: "write_applied",
+        }),
+        expect.objectContaining({
+          actorId: actor.actorId,
+          actorType: actor.actorType,
+          operation: "create",
+          resourceId: created.payload.created,
+          status: "git_commit_succeeded",
+          commitHash: created.payload.writeMeta.git.commitHash,
+        }),
+      ]),
+    );
+
+    const gitLog = runGit(workspace, ["log", "-1", "--pretty=%B"]).stdout.trim();
+    expect(gitLog).toBe(`wiki: create ${created.payload.created} by ${actor.actorId}`);
+  });
+
+  it("returns degraded failure details when Git journaling fails after a write succeeds", async () => {
+    const workspace = createWorkspace({
+      WIKI_SYNC_INTERVAL: "0",
+    });
+    workspaces.push(workspace);
+    initializeDaemonWorkspace(workspace, { git: false });
+
+    const daemon = await startForegroundDaemon(workspace);
+    foregroundDaemons.push(daemon);
+
+    const actor = buildWriteActor({
+      actorId: "user:degraded-case",
+      actorType: "user",
+    });
+    const created = await fetchDaemonJson<{
+      error: string;
+      type: string;
+      details?: {
+        code?: string;
+        degraded?: boolean;
+        requestId?: string;
+        actorId?: string;
+        auditLogPath?: string;
+        writeResult?: { created?: string };
+      };
+    }>(workspace, "/create", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        actor,
+        type: "concept",
+        title: "Degraded Commit Target",
+      }),
+    });
+    expect(created.status).toBe(500);
+    expect(created.payload.details?.code).toBe("git_commit_failed");
+    expect(created.payload.details?.degraded).toBe(true);
+    expect(created.payload.details?.requestId).toBe(actor.requestId);
+    expect(created.payload.details?.actorId).toBe(actor.actorId);
+
+    const createdPageId = created.payload.details?.writeResult?.created;
+    expect(createdPageId).toBeTruthy();
+    const readAfterFailure = await fetchDaemonJson<PageReadPayload>(
+      workspace,
+      `/page-read?pageId=${encodeURIComponent(createdPageId!)}`,
+    );
+    expect(readAfterFailure.status).toBe(200);
+    expect(readAfterFailure.payload.rawMarkdown).toContain("Degraded Commit Target");
+
+    const auditEvents = readAuditEvents(created.payload.details?.auditLogPath ?? "").filter(
+      (event) => event.requestId === actor.requestId,
+    );
+    expect(auditEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          status: "write_applied",
+          resourceId: createdPageId,
+        }),
+        expect.objectContaining({
+          status: "git_commit_failed",
+          resourceId: createdPageId,
+          actorId: actor.actorId,
+        }),
+      ]),
+    );
+  });
+
+  it("queues overlapping writes, exposes queue state, and preserves immediate read consistency", async () => {
+    const server = await startEmbeddingServer({
+      dimensions: 4,
+      handler: async (payload) => {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        const inputs = Array.isArray(payload.input) ? payload.input : [payload.input];
+        return {
+          data: inputs.map((input: string, index: number) => ({
+            index,
+            embedding: Array.from({ length: 4 }, (_, offset) => {
+              const seed = [...String(input)].reduce((sum, char) => sum + char.charCodeAt(0), 0);
+              return Number(((seed + offset + 1) / 1000).toFixed(6));
+            }),
+          })),
+        };
+      },
+    });
+    servers.push(server);
+
+    const workspace = createWorkspace({
+      WIKI_SYNC_INTERVAL: "0",
+      EMBEDDING_BASE_URL: server.url,
+      EMBEDDING_API_KEY: "test-key",
+      EMBEDDING_MODEL: "queue-test-embedding",
+      EMBEDDING_DIMENSIONS: "4",
+    });
+    workspaces.push(workspace);
+    initializeDaemonWorkspace(workspace);
+
+    const daemon = await startForegroundDaemon(workspace);
+    foregroundDaemons.push(daemon);
+
+    const firstCreate = fetchDaemonJson<{ created: string; filePath: string }>(workspace, "/create", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        type: "concept",
+        title: "Queued Create One",
+      }),
+    });
+
+    await waitFor(async () => {
+      const summary = await fetchDaemonJson<WriteQueueSummaryPayload>(workspace, "/write-queue/summary");
+      return summary.payload.activeJob?.taskType === "create" && summary.payload.counts.running === 1;
+    }, 10_000, 20);
+
+    const secondCreate = fetchDaemonJson<{ created: string; filePath: string }>(workspace, "/create", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        type: "concept",
+        title: "Queued Create Two",
+      }),
+    });
+
+    let queuedJobId = "";
+    await waitFor(async () => {
+      const summary = await fetchDaemonJson<WriteQueueSummaryPayload>(workspace, "/write-queue/summary");
+      const queuedJob = summary.payload.queuedJobs.find((job) => job.taskType === "create");
+      if (!queuedJob) {
+        return false;
+      }
+      queuedJobId = queuedJob.jobId;
+      return summary.payload.counts.queued === 1 && queuedJob.positionInQueue === 1;
+    }, 10_000, 20);
+
+    const queuedDetail = await fetchDaemonJson<WriteQueueJobPayload>(
+      workspace,
+      `/write-queue/jobs/${encodeURIComponent(queuedJobId)}`,
+    );
+    expect(queuedDetail.status).toBe(200);
+    expect(queuedDetail.payload.status).toBe("queued");
+    expect(queuedDetail.payload.taskType).toBe("create");
+
+    const [firstResult, secondResult] = await Promise.all([firstCreate, secondCreate]);
+    expect(firstResult.status).toBe(200);
+    expect(secondResult.status).toBe(200);
+    expect(firstResult.payload.created).not.toBe(secondResult.payload.created);
+
+    const summaryAfter = await fetchDaemonJson<WriteQueueSummaryPayload>(workspace, "/write-queue/summary");
+    expect(summaryAfter.status).toBe(200);
+    expect(summaryAfter.payload.counts.queued).toBe(0);
+    expect(summaryAfter.payload.counts.running).toBe(0);
+    expect(summaryAfter.payload.recentJobs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          taskType: "create",
+          status: "succeeded",
+        }),
+      ]),
+    );
+
+    const readSecond = await fetchDaemonJson<PageReadPayload>(
+      workspace,
+      `/page-read?pageId=${encodeURIComponent(secondResult.payload.created)}`,
+    );
+    expect(readSecond.status).toBe(200);
+    expect(readSecond.payload.rawMarkdown).toContain("Queued Create Two");
+  });
+
+  it("rechecks revision at execution time for queued updates and queues sync-trigger behind writes", async () => {
+    const server = await startEmbeddingServer({
+      dimensions: 4,
+      handler: async (payload) => {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        const inputs = Array.isArray(payload.input) ? payload.input : [payload.input];
+        return {
+          data: inputs.map((input: string, index: number) => ({
+            index,
+            embedding: Array.from({ length: 4 }, (_, offset) => {
+              const seed = [...String(input)].reduce((sum, char) => sum + char.charCodeAt(0), 0);
+              return Number(((seed + offset + 1) / 1000).toFixed(6));
+            }),
+          })),
+        };
+      },
+    });
+    servers.push(server);
+
+    const workspace = createWorkspace({
+      WIKI_SYNC_INTERVAL: "0",
+      EMBEDDING_BASE_URL: server.url,
+      EMBEDDING_API_KEY: "test-key",
+      EMBEDDING_MODEL: "queue-test-embedding",
+      EMBEDDING_DIMENSIONS: "4",
+    });
+    workspaces.push(workspace);
+    initializeDaemonWorkspace(workspace);
+
+    const daemon = await startForegroundDaemon(workspace);
+    foregroundDaemons.push(daemon);
+
+    const created = await fetchDaemonJson<{ created: string }>(workspace, "/create", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        type: "concept",
+        title: "Queued Revision Target",
+      }),
+    });
+    expect(created.status).toBe(200);
+
+    const initialRead = await fetchDaemonJson<PageReadPayload>(
+      workspace,
+      `/page-read?pageId=${encodeURIComponent(created.payload.created)}`,
+    );
+    expect(initialRead.status).toBe(200);
+
+    const firstUpdate = fetchDaemonJson<PageReadPayload>(workspace, "/page-update", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        pageId: created.payload.created,
+        bodyMarkdown: "Queued update body.\n",
+        ifRevision: initialRead.payload.revision,
+      }),
+    });
+
+    await waitFor(async () => {
+      const summary = await fetchDaemonJson<WriteQueueSummaryPayload>(workspace, "/write-queue/summary");
+      return summary.payload.activeJob?.taskType === "update";
+    }, 10_000, 20);
+
+    const staleUpdate = fetchDaemonJson<{
+      error: string;
+      type: string;
+      details?: { code?: string; currentRevision?: string | null };
+    }>(workspace, "/page-update", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        pageId: created.payload.created,
+        bodyMarkdown: "Stale queued update.\n",
+        ifRevision: initialRead.payload.revision,
+      }),
+    });
+
+    const trigger = fetchDaemonJson<{ status: string; task: string }>(workspace, "/sync/trigger", {
+      method: "POST",
+    });
+
+    let triggerJobId = "";
+    await waitFor(async () => {
+      const summary = await fetchDaemonJson<WriteQueueSummaryPayload>(workspace, "/write-queue/summary");
+      const triggerJob = summary.payload.queuedJobs.find((job) => job.taskType === "sync-trigger");
+      if (!triggerJob) {
+        return false;
+      }
+      triggerJobId = triggerJob.jobId;
+      return summary.payload.counts.queued >= 2;
+    }, 10_000, 20);
+
+    const triggerQueuedDetail = await fetchDaemonJson<WriteQueueJobPayload>(
+      workspace,
+      `/write-queue/jobs/${encodeURIComponent(triggerJobId)}`,
+    );
+    expect(triggerQueuedDetail.status).toBe(200);
+    expect(triggerQueuedDetail.payload.status).toBe("queued");
+    expect(triggerQueuedDetail.payload.taskType).toBe("sync-trigger");
+
+    const [firstUpdateResult, staleUpdateResult, triggerResult] = await Promise.all([
+      firstUpdate,
+      staleUpdate,
+      trigger,
+    ]);
+    expect(firstUpdateResult.status).toBe(200);
+    expect(staleUpdateResult.status).toBe(409);
+    expect(staleUpdateResult.payload.details?.code).toBe("revision_conflict");
+    expect(staleUpdateResult.payload.details?.currentRevision).toBe(firstUpdateResult.payload.revision);
+    expect(triggerResult.status).toBe(200);
+    expect(triggerResult.payload.task).toBe("sync-trigger");
+
+    const finalRead = await fetchDaemonJson<PageReadPayload>(
+      workspace,
+      `/page-read?pageId=${encodeURIComponent(created.payload.created)}`,
+    );
+    expect(finalRead.status).toBe(200);
+    expect(finalRead.payload.rawMarkdown).toContain("Queued update body.");
+    expect(finalRead.payload.revision).toBe(firstUpdateResult.payload.revision);
+
+    const summaryAfter = await fetchDaemonJson<WriteQueueSummaryPayload>(workspace, "/write-queue/summary");
+    expect(summaryAfter.payload.recentJobs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ taskType: "update", status: "failed" }),
+        expect.objectContaining({ taskType: "sync-trigger", status: "succeeded" }),
+      ]),
+    );
+  });
+
+  it("returns 503 queue_full when the write queue exceeds the configured depth limit", async () => {
+    const server = await startEmbeddingServer({
+      dimensions: 4,
+      handler: async (payload) => {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        const inputs = Array.isArray(payload.input) ? payload.input : [payload.input];
+        return {
+          data: inputs.map((input: string, index: number) => ({
+            index,
+            embedding: Array.from({ length: 4 }, (_, offset) => {
+              const seed = [...String(input)].reduce((sum, char) => sum + char.charCodeAt(0), 0);
+              return Number(((seed + offset + 1) / 1000).toFixed(6));
+            }),
+          })),
+        };
+      },
+    });
+    servers.push(server);
+
+    const workspace = createWorkspace({
+      WIKI_SYNC_INTERVAL: "0",
+      WIKI_TEST_WRITE_QUEUE_MAX_DEPTH: "1",
+      EMBEDDING_BASE_URL: server.url,
+      EMBEDDING_API_KEY: "test-key",
+      EMBEDDING_MODEL: "queue-test-embedding",
+      EMBEDDING_DIMENSIONS: "4",
+    });
+    workspaces.push(workspace);
+    initializeDaemonWorkspace(workspace);
+
+    const daemon = await startForegroundDaemon(workspace);
+    foregroundDaemons.push(daemon);
+
+    const firstCreate = fetchDaemonJson<{ created: string }>(workspace, "/create", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        type: "concept",
+        title: "Queue Depth One",
+      }),
+    });
+
+    await waitFor(async () => {
+      const summary = await fetchDaemonJson<WriteQueueSummaryPayload>(workspace, "/write-queue/summary");
+      return summary.payload.activeJob?.taskType === "create";
+    }, 10_000, 20);
+
+    const secondCreate = fetchDaemonJson<{ created: string }>(workspace, "/create", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        type: "concept",
+        title: "Queue Depth Two",
+      }),
+    });
+
+    await waitFor(async () => {
+      const summary = await fetchDaemonJson<WriteQueueSummaryPayload>(workspace, "/write-queue/summary");
+      return summary.payload.counts.queued === 1;
+    }, 10_000, 20);
+
+    const thirdCreate = await fetchDaemonJson<{
+      error: string;
+      type: string;
+      details?: { code?: string; maxDepth?: number };
+    }>(workspace, "/create", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        type: "concept",
+        title: "Queue Depth Three",
+      }),
+    });
+
+    expect(thirdCreate.status).toBe(503);
+    expect(thirdCreate.payload.details?.code).toBe("queue_full");
+    expect(thirdCreate.payload.details?.maxDepth).toBe(1);
+
+    const [firstResult, secondResult] = await Promise.all([firstCreate, secondCreate]);
+    expect(firstResult.status).toBe(200);
+    expect(secondResult.status).toBe(200);
+  });
+
   it("falls back to local reads when the daemon is degraded and refuses write commands", async () => {
     const workspace = createWorkspace();
     workspaces.push(workspace);
-    runCli(["init"], workspace.env);
+    initializeDaemonWorkspace(workspace, { git: false });
 
     const idleProcess = await startIdleProcess();
     childProcesses.push(idleProcess);
@@ -450,7 +1084,7 @@ describe("daemon HTTP server integration", () => {
       WIKI_SYNC_INTERVAL: "0",
     });
     workspaces.push(workspace);
-    runCli(["init"], workspace.env);
+    initializeDaemonWorkspace(workspace);
 
     const daemon = await startForegroundDaemon(workspace);
     foregroundDaemons.push(daemon);
@@ -524,7 +1158,7 @@ describe("daemon HTTP server integration", () => {
     writeVaultFile(workspace, "imports/batch-3.pptx", "Batch file three.");
     writeVaultFile(workspace, "imports/batch-4.xlsx", "Batch file four.");
     writeVaultFile(workspace, "imports/batch-5.md", "# Batch file five");
-    runCli(["init"], workspace.env);
+    initializeDaemonWorkspace(workspace);
 
     const daemon = await startForegroundDaemon(workspace);
     foregroundDaemons.push(daemon);
@@ -556,7 +1190,7 @@ describe("daemon HTTP server integration", () => {
     });
     workspaces.push(workspace);
 
-    runCli(["init"], workspace.env);
+    initializeDaemonWorkspace(workspace);
     writeVaultFile(workspace, "imports/alpha.md", "# Alpha Source\n\nThis is a local vault source.");
     writePage(
       workspace,
@@ -737,7 +1371,7 @@ Alpha source overview.
     expect(refresh.status).toBe(200);
     expect(refresh.payload.daemon.running).toBe(true);
 
-    await fetchDaemonJson<{ status: string; currentTask: string }>(workspace, "/sync/trigger", {
+    await fetchDaemonJson<{ status: string; task: string }>(workspace, "/sync/trigger", {
       method: "POST",
     });
     await waitFor(async () => {
@@ -764,7 +1398,7 @@ Alpha source overview.
     writeVaultFile(workspace, "imports/stop-1.pdf", "Stop file one.");
     writeVaultFile(workspace, "imports/stop-2.docx", "Stop file two.");
     writeVaultFile(workspace, "imports/stop-3.md", "# Stop file three");
-    runCli(["init"], workspace.env);
+    initializeDaemonWorkspace(workspace);
 
     const daemon = await startForegroundDaemon(workspace);
     foregroundDaemons.push(daemon);
@@ -799,7 +1433,7 @@ Alpha source overview.
         WIKI_DAEMON_PORT: String(busyPort.port),
       });
       workspaces.push(workspace);
-      runCli(["init"], workspace.env);
+      initializeDaemonWorkspace(workspace);
 
       const result = runCli(["daemon", "start"], workspace.env, { allowFailure: true });
       expect(result.status).toBe(1);

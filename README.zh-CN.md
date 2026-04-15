@@ -99,7 +99,7 @@ tiangong-wiki dashboard                               # 在浏览器中打开仪
 # 或者：tiangong-wiki daemon run                      # 前台运行 daemon，适合调试
 ```
 
-> 环境变量通过 `.wiki.env` 管理（由 `tiangong-wiki setup` 创建）。CLI 会优先使用最近的本地 `.wiki.env`，找不到时再 fallback 到全局默认工作区配置。完整参考见 [references/troubleshooting.md](./references/troubleshooting.md)。
+> 环境变量通过 `.wiki.env` 管理（由 `tiangong-wiki setup` 创建）。CLI 会优先使用最近的本地 `.wiki.env`，找不到时再 fallback 到全局默认工作区配置。完整参考见 [references/troubleshooting.md](./references/troubleshooting.md)。如需部署中心化服务（Linux + `systemd` + Nginx），见 [references/centralized-service-deployment.md](./references/centralized-service-deployment.md)。
 
 ## CLI
 

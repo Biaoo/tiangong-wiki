@@ -173,6 +173,7 @@ export async function requestDaemonJson<T>(options: {
   path: string;
   query?: Record<string, string | number | boolean | null | undefined>;
   body?: unknown;
+  timeoutMs?: number;
 }): Promise<T> {
   let endpoint = options.endpoint ?? null;
   if (!endpoint) {
@@ -190,7 +191,7 @@ export async function requestDaemonJson<T>(options: {
       headers: options.body === undefined ? undefined : { "content-type": "application/json" },
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
     },
-    5_000,
+    options.timeoutMs ?? (options.method === "POST" ? 310_000 : 5_000),
   );
 }
 

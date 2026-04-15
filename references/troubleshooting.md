@@ -34,6 +34,21 @@ All configuration is managed through `.wiki.env` (created by `tiangong-wiki setu
 | `WIKI_TEMPLATES_PATH` | Yes | Path to the templates directory |
 | `WIKI_SYNC_INTERVAL` | No | Auto-sync interval in seconds (default: `86400`) |
 
+### Daemon and MCP
+
+| Variable | Required | Description |
+| --- | --- | --- |
+| `WIKI_DAEMON_PORT` | No | Loopback daemon port |
+| `WIKI_MCP_HOST` | No | MCP bind host (recommended: `127.0.0.1`) |
+| `WIKI_MCP_PORT` | No | MCP bind port |
+| `WIKI_MCP_PATH` | No | MCP HTTP path (default: `/mcp`) |
+| `WIKI_DAEMON_BASE_URL` | For MCP service | Daemon base URL used by the MCP adapter |
+| `WIKI_GIT_AUTO_PUSH` | No | Enable daemon-side async Git push batching |
+| `WIKI_GIT_PUSH_REMOTE` | No | Git remote name for async push (default: `origin`) |
+| `WIKI_GIT_PUSH_DELAY_MS` | No | Delay before async push (default: `3000`) |
+
+For the full single-host deployment baseline, see [centralized-service-deployment.md](./centralized-service-deployment.md).
+
 ### Vault
 
 | Variable | Required | Description |

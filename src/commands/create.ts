@@ -1,6 +1,7 @@
 import { Command } from "commander";
 
 import { executeServerBackedOperation, requestDaemonJson } from "../daemon/client.js";
+import { buildCliWriteActor } from "../daemon/write-actor.js";
 import { createPage } from "../operations/write.js";
 import { writeJson } from "../utils/output.js";
 
@@ -25,7 +26,9 @@ export function registerCreateCommand(program: Command): void {
             endpoint,
             method: "POST",
             path: "/create",
+            timeoutMs: 310_000,
             body: {
+              actor: buildCliWriteActor(process.env),
               type: options.type,
               title: options.title,
               nodeId: options.nodeId ?? undefined,

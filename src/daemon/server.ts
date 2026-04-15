@@ -3,7 +3,14 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 
 import { getMeta } from "../core/db.js";
-import { openRuntimeDb } from "../core/runtime.js";
+import { normalizePageId } from "../core/paths.js";
+import { readCanonicalPageSourceById } from "../core/page-source.js";
+import { selectPageById } from "../core/query.js";
+import { loadRuntimeConfig, openRuntimeDb } from "../core/runtime.js";
+import { DaemonWriteQueue } from "./write-queue.js";
+import { appendAuditEvent } from "./audit-log.js";
+import { commitWriteJournal, GitPushScheduler } from "./git-journal.js";
+import { buildCliWriteActor, buildSystemWriteActor, resolveWriteActor } from "./write-actor.js";
 import { exportGraphContent, exportIndexContent } from "../operations/export.js";
 import {
   getDashboardGraphOverview,
@@ -46,8 +53,15 @@ import {
   showType,
 } from "../operations/type-template.js";
 import { runTemplateLint } from "../operations/template-lint.js";
-import { createPage, runSync, runSyncCommand } from "../operations/write.js";
-import type { DaemonLaunchMode, DaemonState, DaemonTask } from "../types/page.js";
+import { createPage, runSync, runSyncCommand, updatePage } from "../operations/write.js";
+import type {
+  DaemonLaunchMode,
+  DaemonState,
+  DaemonTask,
+  DaemonWriteJobSnapshot,
+  DaemonWriteMeta,
+  WriteActorMetadata,
+} from "../types/page.js";
 import { AppError, asAppError } from "../utils/errors.js";
 import { pathExistsSync } from "../utils/fs.js";
 import { addSeconds, toOffsetIso } from "../utils/time.js";
@@ -211,13 +225,21 @@ async function readJsonBody(request: http.IncomingMessage): Promise<Record<strin
   }
 }
 
-function isBusyError(error: AppError): boolean {
-  return (
-    typeof error.details === "object" &&
-    error.details !== null &&
-    "code" in error.details &&
-    (error.details as { code?: unknown }).code === "busy"
-  );
+function getErrorDetailsCode(error: AppError): string | null {
+  if (typeof error.details !== "object" || error.details === null || !("code" in error.details)) {
+    return null;
+  }
+  const code = (error.details as { code?: unknown }).code;
+  return typeof code === "string" ? code : null;
+}
+
+function isConflictError(error: AppError): boolean {
+  const code = getErrorDetailsCode(error);
+  return code === "busy" || code === "revision_conflict";
+}
+
+function isServiceUnavailableError(error: AppError): boolean {
+  return getErrorDetailsCode(error) === "queue_full";
 }
 
 async function buildStatusPayload(
@@ -263,7 +285,6 @@ export async function runDaemonServer(options: {
   let cycleTimer: NodeJS.Timeout | null = null;
   let queuedCycle = false;
   let stopping = false;
-  let currentWrite: Promise<unknown> | null = null;
   let server: http.Server;
   let resolveClosed: (() => void) | null = null;
   let nextDashboardLogId = 1;
@@ -310,6 +331,7 @@ export async function runDaemonServer(options: {
     broadcastDashboardLog(entry);
     console.error(entry.line);
   };
+  const gitPushScheduler = new GitPushScheduler(paths, logInfo, env);
 
   const serveDashboardApp = (requestPath: string, response: http.ServerResponse) => {
     if (!pathExistsSync(dashboardDistPath)) {
@@ -400,6 +422,46 @@ export async function runDaemonServer(options: {
     }
   };
 
+  const afterWriteComplete = (task: DaemonTask) => {
+    if (queuedCycle && !stopping) {
+      queuedCycle = false;
+      void enqueueWriteTask("cycle", () => runCycleTransaction(buildSystemWriteActor("daemon"), "cycle"), {
+        summarizeResult: summarizeCycleResult,
+      }).catch((error: unknown) => {
+        const appError = asAppError(error);
+        logError(`queued cycle failed: ${appError.message}`);
+      });
+      return;
+    }
+
+    if (task === "cycle" || task === "sync-trigger") {
+      scheduleNextCycle();
+    } else {
+      persistState();
+    }
+  };
+
+  const writeQueue = new DaemonWriteQueue(env, {
+    onJobStart: (job: DaemonWriteJobSnapshot) => {
+      if (state) {
+        state.currentTask = job.taskType;
+        if (job.taskType === "cycle" || job.taskType === "sync-trigger") {
+          state.nextRunAt = null;
+        }
+        persistState();
+      }
+    },
+    onJobFinish: (job: DaemonWriteJobSnapshot) => {
+      if (state) {
+        state.lastRunAt = toOffsetIso();
+        state.lastResult = job.status === "succeeded" ? "ok" : "error";
+        state.lastError = job.errorMessage;
+        state.currentTask = "idle";
+      }
+      afterWriteComplete(job.taskType);
+    },
+  });
+
   const clearTimer = () => {
     if (cycleTimer) {
       clearTimeout(cycleTimer);
@@ -425,7 +487,7 @@ export async function runDaemonServer(options: {
       if (stopping) {
         return;
       }
-      if (currentWrite) {
+      if (writeQueue.hasWork()) {
         queuedCycle = true;
         if (state) {
           state.nextRunAt = null;
@@ -433,125 +495,391 @@ export async function runDaemonServer(options: {
         }
         return;
       }
-      void runDefaultCycle("cycle").catch((error: unknown) => {
+      void enqueueWriteTask("cycle", () => runCycleTransaction(buildSystemWriteActor("daemon"), "cycle"), {
+        summarizeResult: summarizeCycleResult,
+      }).catch((error: unknown) => {
         const appError = asAppError(error);
         logError(`scheduled cycle failed: ${appError.message}`);
       });
     }, interval * 1000);
   };
 
-  const afterWriteComplete = (task: DaemonTask) => {
-    if (queuedCycle && !stopping) {
-      queuedCycle = false;
-      void runDefaultCycle("cycle").catch((error: unknown) => {
-        const appError = asAppError(error);
-        logError(`queued cycle failed: ${appError.message}`);
-      });
-      return;
-    }
-
-    if (task === "cycle" || task === "sync-trigger") {
-      scheduleNextCycle();
-    } else {
-      persistState();
-    }
-  };
-
-  const runWriteTask = async <T>(task: DaemonTask, run: () => Promise<T>): Promise<T> => {
+  const enqueueWriteTask = async <T>(
+    task: DaemonTask,
+    run: () => Promise<T>,
+    options: {
+      summarizeResult?: (result: T) => Record<string, unknown> | null;
+    } = {},
+  ): Promise<T> => {
     if (stopping) {
       throw new AppError("Wiki daemon is shutting down.", "runtime");
     }
-    if (currentWrite) {
-      throw new AppError(`Wiki daemon is busy running ${state?.currentTask ?? "another task"}.`, "runtime", {
-        code: "busy",
-        currentTask: state?.currentTask ?? "unknown",
-      });
-    }
-
-    const promise = (async () => {
-      if (state) {
-        state.currentTask = task;
-        if (task === "cycle" || task === "sync-trigger") {
-          state.nextRunAt = null;
-        }
-        persistState();
-      }
-
-      try {
-        const result = await run();
-        if (state) {
-          state.lastRunAt = toOffsetIso();
-          state.lastResult = "ok";
-          state.lastError = null;
-          state.currentTask = "idle";
-        }
-        return result;
-      } catch (error) {
-        const appError = asAppError(error);
-        if (state) {
-          state.lastRunAt = toOffsetIso();
-          state.lastResult = "error";
-          state.lastError = appError.message;
-          state.currentTask = "idle";
-        }
-        throw appError;
-      } finally {
-        currentWrite = null;
-        afterWriteComplete(task);
-      }
-    })();
-
-    currentWrite = promise;
-    return promise;
+    return writeQueue.enqueue(task, run, options);
   };
 
-  const runDefaultCycle = async (task: Extract<DaemonTask, "cycle" | "sync-trigger">) => {
-    return runWriteTask(task, async () => {
-      logInfo(`${task}: start`);
-      const syncResult = await runSync(env);
+  const enrichWriteResult = <T extends object>(
+    result: T,
+    actor: WriteActorMetadata,
+    git: DaemonWriteMeta["git"],
+  ): T & { writeMeta: DaemonWriteMeta } => {
+    return {
+      ...result,
+      writeMeta: {
+        requestId: actor.requestId,
+        actorId: actor.actorId,
+        actorType: actor.actorType,
+        auditLogPath: paths.auditLogPath,
+        git,
+      },
+    };
+  };
+
+  const resolveCanonicalPageId = (inputPageId: string): string => {
+    const { db, config } = openRuntimeDb(env);
+    try {
+      const normalizedPageId = normalizePageId(inputPageId, paths.wikiPath);
+      const page = selectPageById(db, config, normalizedPageId);
+      if (!page) {
+        throw new AppError(`Page not found: ${normalizedPageId}`, "not_found");
+      }
+      return String(page.id);
+    } finally {
+      db.close();
+    }
+  };
+
+  const readPageRevision = (pageId: string): string | null => {
+    return readCanonicalPageSourceById(pageId, paths.wikiPath, loadRuntimeConfig(env).config).revision;
+  };
+
+  const buildErrorDetails = (error: AppError): Record<string, unknown> => {
+    const details =
+      typeof error.details === "object" && error.details !== null && !Array.isArray(error.details)
+        ? ({ ...error.details } as Record<string, unknown>)
+        : {};
+    if (!("message" in details)) {
+      details.message = error.message;
+    }
+    return details;
+  };
+
+  const recordSyncFailureAndThrow = (
+    actor: WriteActorMetadata,
+    input: {
+      operation: string;
+      resourceId: string | null;
+      revisionBefore: string | null;
+      revisionAfter: string | null;
+      error: AppError;
+    },
+  ): never => {
+    appendAuditEvent(paths, actor, {
+      operation: input.operation,
+      resourceId: input.resourceId,
+      status: "sync_failed",
+      revisionBefore: input.revisionBefore,
+      revisionAfter: input.revisionAfter,
+      commitHash: null,
+      details: buildErrorDetails(input.error),
+    });
+    throw new AppError(input.error.message, input.error.type, {
+      ...buildErrorDetails(input.error),
+      requestId: actor.requestId,
+      actorId: actor.actorId,
+      actorType: actor.actorType,
+      auditLogPath: paths.auditLogPath,
+    });
+  };
+
+  const finalizeJournaledWrite = async <T extends object>(
+    actor: WriteActorMetadata,
+    input: {
+      operation: string;
+      resourceId: string | null;
+      revisionBefore: string | null;
+      revisionAfter: string | null;
+      result: T;
+      details?: Record<string, unknown> | null;
+    },
+  ): Promise<T & { writeMeta: DaemonWriteMeta }> => {
+    appendAuditEvent(paths, actor, {
+      operation: input.operation,
+      resourceId: input.resourceId,
+      status: "write_applied",
+      revisionBefore: input.revisionBefore,
+      revisionAfter: input.revisionAfter,
+      commitHash: null,
+      details: input.details ?? null,
+    });
+
+    try {
+      const gitResult = commitWriteJournal(paths, actor, {
+        operation: input.operation,
+        resourceId: input.resourceId,
+      });
+      const pushScheduled = gitResult.status === "committed" ? gitPushScheduler.schedule(actor) : false;
+      appendAuditEvent(paths, actor, {
+        operation: input.operation,
+        resourceId: input.resourceId,
+        status: gitResult.status === "committed" ? "git_commit_succeeded" : "git_commit_skipped",
+        revisionBefore: input.revisionBefore,
+        revisionAfter: input.revisionAfter,
+        commitHash: gitResult.commitHash,
+        details: gitResult.status === "committed" ? { pushScheduled } : { reason: "no_staged_changes" },
+      });
+      return enrichWriteResult(input.result, actor, {
+        status: gitResult.status,
+        commitHash: gitResult.commitHash,
+        pushScheduled,
+      });
+    } catch (error) {
+      const appError = asAppError(error);
+      appendAuditEvent(paths, actor, {
+        operation: input.operation,
+        resourceId: input.resourceId,
+        status: "git_commit_failed",
+        revisionBefore: input.revisionBefore,
+        revisionAfter: input.revisionAfter,
+        commitHash: null,
+        details: buildErrorDetails(appError),
+      });
+      throw new AppError("Git commit failed after write succeeded.", "runtime", {
+        code: "git_commit_failed",
+        degraded: true,
+        requestId: actor.requestId,
+        actorId: actor.actorId,
+        actorType: actor.actorType,
+        resourceId: input.resourceId,
+        revisionBefore: input.revisionBefore,
+        revisionAfter: input.revisionAfter,
+        auditLogPath: paths.auditLogPath,
+        writeResult: input.result,
+        gitError: appError.message,
+      });
+    }
+  };
+
+  const summarizeCycleResult = (result: {
+    status: string;
+    task: string;
+    sync: { mode: string; inserted: number; updated: number; deleted: number; vault: { changes: number } };
+    queue: { processed: number; done: number; skipped: number; errored: number; batches: number };
+    writeMeta?: DaemonWriteMeta;
+  }) => ({
+    status: result.status,
+    task: result.task,
+    sync: {
+      mode: result.sync.mode,
+      inserted: result.sync.inserted,
+      updated: result.sync.updated,
+      deleted: result.sync.deleted,
+      vaultChanges: result.sync.vault.changes,
+    },
+    queue: result.queue,
+  });
+ 
+  const runCycleTask = async (task: Extract<DaemonTask, "cycle" | "sync-trigger">) => {
+    logInfo(`${task}: start`);
+    const syncResult = await runSync(env);
+    logInfo(
+      `${task}: sync ok mode=${syncResult.mode} inserted=${syncResult.inserted} updated=${syncResult.updated} deleted=${syncResult.deleted} vaultChanges=${syncResult.vault.changes}`,
+    );
+    const queueResult = {
+      enabled: false,
+      processed: 0,
+      done: 0,
+      skipped: 0,
+      errored: 0,
+      batches: 0,
+    };
+
+    while (!stopping) {
+      const batchResult = await processVaultQueueBatch(env, {
+        log: (message) => logInfo(`queue ${message}`),
+      });
+      if (!batchResult.enabled) {
+        break;
+      }
+
+      queueResult.enabled = true;
+      if (batchResult.processed === 0) {
+        break;
+      }
+
+      queueResult.processed += batchResult.processed;
+      queueResult.done += batchResult.done;
+      queueResult.skipped += batchResult.skipped;
+      queueResult.errored += batchResult.errored;
+      queueResult.batches += 1;
+    }
+
+    if (queueResult.enabled) {
       logInfo(
-        `${task}: sync ok mode=${syncResult.mode} inserted=${syncResult.inserted} updated=${syncResult.updated} deleted=${syncResult.deleted} vaultChanges=${syncResult.vault.changes}`,
+        `${task}: queue summary processed=${queueResult.processed} done=${queueResult.done} skipped=${queueResult.skipped} errored=${queueResult.errored} batches=${queueResult.batches}`,
       );
-      const queueResult = {
-        enabled: false,
-        processed: 0,
-        done: 0,
-        skipped: 0,
-        errored: 0,
-        batches: 0,
-      };
+    }
 
-      while (!stopping) {
-        const batchResult = await processVaultQueueBatch(env, {
-          log: (message) => logInfo(`queue ${message}`),
+    return {
+      status: "started",
+      task,
+      sync: syncResult,
+      queue: queueResult,
+    };
+  };
+
+  const runCreateTransaction = async (
+    actor: WriteActorMetadata,
+    input: { type: string; title: string; nodeId?: string },
+  ) => {
+    try {
+      const result = await createPage(env, input);
+      const revisionAfter = readPageRevision(result.created);
+      return await finalizeJournaledWrite(actor, {
+        operation: "create",
+        resourceId: result.created,
+        revisionBefore: null,
+        revisionAfter,
+        result,
+      });
+    } catch (error) {
+      const appError = asAppError(error);
+      if (getErrorDetailsCode(appError) === "sync_failed") {
+        const details = buildErrorDetails(appError);
+        recordSyncFailureAndThrow(actor, {
+          operation: "create",
+          resourceId: typeof details.pageId === "string" ? details.pageId : null,
+          revisionBefore: null,
+          revisionAfter: typeof details.revisionAfter === "string" ? details.revisionAfter : null,
+          error: appError,
         });
-        if (!batchResult.enabled) {
-          break;
-        }
-
-        queueResult.enabled = true;
-        if (batchResult.processed === 0) {
-          break;
-        }
-
-        queueResult.processed += batchResult.processed;
-        queueResult.done += batchResult.done;
-        queueResult.skipped += batchResult.skipped;
-        queueResult.errored += batchResult.errored;
-        queueResult.batches += 1;
       }
+      throw appError;
+    }
+  };
 
-      if (queueResult.enabled) {
-        logInfo(
-          `${task}: queue summary processed=${queueResult.processed} done=${queueResult.done} skipped=${queueResult.skipped} errored=${queueResult.errored} batches=${queueResult.batches}`,
-        );
+  const runUpdateTransaction = async (
+    actor: WriteActorMetadata,
+    input: {
+      pageId: string;
+      bodyMarkdown?: string;
+      frontmatterPatch?: Record<string, unknown>;
+      ifRevision?: string;
+    },
+  ) => {
+    const canonicalPageId = resolveCanonicalPageId(input.pageId);
+    const revisionBefore = readPageRevision(canonicalPageId);
+    try {
+      const result = await updatePage(env, input);
+      return await finalizeJournaledWrite(actor, {
+        operation: "update",
+        resourceId: result.pageId,
+        revisionBefore,
+        revisionAfter: result.revision,
+        result,
+      });
+    } catch (error) {
+      const appError = asAppError(error);
+      if (getErrorDetailsCode(appError) === "sync_failed") {
+        const details = buildErrorDetails(appError);
+        recordSyncFailureAndThrow(actor, {
+          operation: "update",
+          resourceId: typeof details.pageId === "string" ? details.pageId : canonicalPageId,
+          revisionBefore: typeof details.revisionBefore === "string" ? details.revisionBefore : revisionBefore,
+          revisionAfter: typeof details.revisionAfter === "string" ? details.revisionAfter : null,
+          error: appError,
+        });
       }
-      return {
-        status: "started",
-        task,
-        sync: syncResult,
-        queue: queueResult,
-      };
+      throw appError;
+    }
+  };
+
+  const runSyncTransaction = async (
+    actor: WriteActorMetadata,
+    input: {
+      targetPaths?: string[];
+      force?: boolean;
+      skipEmbedding?: boolean;
+      process?: boolean;
+      vaultFileId?: string;
+    },
+  ) => {
+    try {
+      const result = await runSyncCommand(env, input);
+      const resourceId = input.targetPaths?.[0] ?? input.vaultFileId ?? "*";
+      return await finalizeJournaledWrite(actor, {
+        operation: "sync",
+        resourceId,
+        revisionBefore: null,
+        revisionAfter: null,
+        result,
+      });
+    } catch (error) {
+      const appError = asAppError(error);
+      return recordSyncFailureAndThrow(actor, {
+        operation: "sync",
+        resourceId: input.targetPaths?.[0] ?? input.vaultFileId ?? "*",
+        revisionBefore: null,
+        revisionAfter: null,
+        error: appError,
+      });
+    }
+  };
+
+  const runCycleTransaction = async (
+    actor: WriteActorMetadata,
+    task: Extract<DaemonTask, "cycle" | "sync-trigger">,
+  ) => {
+    try {
+      const result = await runCycleTask(task);
+      return await finalizeJournaledWrite(actor, {
+        operation: task,
+        resourceId: "*",
+        revisionBefore: null,
+        revisionAfter: null,
+        result,
+      });
+    } catch (error) {
+      const appError = asAppError(error);
+      return recordSyncFailureAndThrow(actor, {
+        operation: task,
+        resourceId: "*",
+        revisionBefore: null,
+        revisionAfter: null,
+        error: appError,
+      });
+    }
+  };
+
+  const runTemplateCreateTransaction = async (
+    actor: WriteActorMetadata,
+    input: { type: string; title: string },
+  ) => {
+    const result = Promise.resolve(
+      createTemplate(env, {
+        type: input.type,
+        title: input.title,
+      }),
+    );
+    return await finalizeJournaledWrite(actor, {
+      operation: "template-create",
+      resourceId: `template:${input.type}`,
+      revisionBefore: null,
+      revisionAfter: null,
+      result: await result,
+    });
+  };
+
+  const runQueueRetryTransaction = async (
+    actor: WriteActorMetadata,
+    fileId: string,
+  ) => {
+    const result = await retryDashboardQueueItem(env, fileId);
+    return await finalizeJournaledWrite(actor, {
+      operation: "queue-retry",
+      resourceId: `queue:${fileId}`,
+      revisionBefore: null,
+      revisionAfter: null,
+      result,
     });
   };
 
@@ -569,7 +897,7 @@ export async function runDaemonServer(options: {
     }
 
     try {
-      await currentWrite?.catch(() => undefined);
+      await writeQueue.waitForIdle();
     } finally {
       await new Promise<void>((resolve) => {
         server.close(() => resolve());
@@ -612,40 +940,57 @@ export async function runDaemonServer(options: {
 
       if (method === "POST" && pathname === "/sync") {
         const body = await readJsonBody(request);
+        const actor = resolveWriteActor(request, body, buildCliWriteActor(env));
         const pathValue =
           typeof body.path === "string" && body.path.trim()
             ? body.path.trim()
             : Array.isArray(body.targetPaths) && typeof body.targetPaths[0] === "string"
               ? String(body.targetPaths[0])
               : undefined;
-        const result = await runWriteTask("sync", async () =>
-          runSyncCommand(env, {
+        const result = await enqueueWriteTask("sync", async () =>
+          runSyncTransaction(actor, {
             targetPaths: pathValue ? [pathValue] : undefined,
             force: body.force === true,
             skipEmbedding: body.skipEmbedding === true,
             process: body.process === true,
             vaultFileId: typeof body.vaultFileId === "string" && body.vaultFileId.trim() ? body.vaultFileId.trim() : undefined,
-          }),
+          }), {
+            summarizeResult: (payload: any) => ({
+              mode: payload.mode,
+              inserted: payload.inserted,
+              updated: payload.updated,
+              deleted: payload.deleted,
+              queueProcessed: payload.queueProcess?.processed ?? 0,
+            }),
+          }
         );
         writeJsonResponse(response, 200, result);
         return;
       }
 
       if (method === "POST" && pathname === "/sync/trigger") {
-        if (currentWrite) {
-          throw new AppError(`Wiki daemon is busy running ${state?.currentTask ?? "another task"}.`, "runtime", {
-            code: "busy",
-            currentTask: state?.currentTask ?? "unknown",
-          });
+        const body = await readJsonBody(request);
+        const actor = resolveWriteActor(request, body, buildCliWriteActor(env));
+        const result = await enqueueWriteTask("sync-trigger", () => runCycleTransaction(actor, "sync-trigger"), {
+          summarizeResult: summarizeCycleResult,
+        });
+        writeJsonResponse(response, 200, result);
+        return;
+      }
+
+      if (method === "GET" && pathname === "/write-queue/summary") {
+        writeJsonResponse(response, 200, writeQueue.getSummary());
+        return;
+      }
+
+      const writeQueueJobMatch = pathname.match(/^\/write-queue\/jobs\/(.+)$/);
+      if (method === "GET" && writeQueueJobMatch) {
+        const jobId = decodePathParam(writeQueueJobMatch[1]);
+        const job = writeQueue.getJob(jobId);
+        if (!job) {
+          throw new AppError(`Write queue job not found: ${jobId}`, "not_found");
         }
-        void runDefaultCycle("sync-trigger").catch((error) => {
-          const appError = asAppError(error);
-          logError(`sync-trigger failed: ${appError.message}`);
-        });
-        writeJsonResponse(response, 200, {
-          status: "started",
-          currentTask: "sync-trigger",
-        });
+        writeJsonResponse(response, 200, job);
         return;
       }
 
@@ -706,10 +1051,17 @@ export async function runDaemonServer(options: {
       const queueRetryMatch = pathname.match(/^\/api\/dashboard\/queue\/items\/(.+)\/retry$/);
       if (method === "POST" && queueRetryMatch) {
         const fileId = decodePathParam(queueRetryMatch[1]);
+        const body = await readJsonBody(request);
+        const actor = resolveWriteActor(request, body, buildCliWriteActor(env));
         writeJsonResponse(
           response,
           200,
-          await runWriteTask("queue-retry", async () => retryDashboardQueueItem(env, fileId)),
+          await enqueueWriteTask("queue-retry", async () => runQueueRetryTransaction(actor, fileId), {
+            summarizeResult: (payload) => ({
+              fileId,
+              status: typeof payload.status === "string" ? payload.status : "unknown",
+            }),
+          }),
         );
         return;
       }
@@ -862,6 +1214,33 @@ export async function runDaemonServer(options: {
         return;
       }
 
+      if (method === "GET" && pathname === "/page-read") {
+        const pageId = url.searchParams.get("pageId");
+        if (!pageId) {
+          throw new AppError("pageId is required", "config", {
+            code: "invalid_request",
+            field: "pageId",
+          });
+        }
+
+        const { db, config, paths } = openRuntimeDb(env);
+        try {
+          const normalizedPageId = normalizePageId(pageId, paths.wikiPath);
+          const page = selectPageById(db, config, normalizedPageId);
+          if (!page) {
+            throw new AppError(`Page not found: ${normalizedPageId}`, "not_found");
+          }
+          writeJsonResponse(
+            response,
+            200,
+            readCanonicalPageSourceById(String(page.id), paths.wikiPath, config),
+          );
+        } finally {
+          db.close();
+        }
+        return;
+      }
+
       if (method === "GET" && pathname === "/list") {
         writeJsonResponse(
           response,
@@ -917,15 +1296,41 @@ export async function runDaemonServer(options: {
 
       if (method === "POST" && pathname === "/create") {
         const body = await readJsonBody(request);
+        const actor = resolveWriteActor(request, body, buildCliWriteActor(env));
         const type = typeof body.type === "string" ? body.type : "";
         const title = typeof body.title === "string" ? body.title : "";
         const nodeId = typeof body.nodeId === "string" ? body.nodeId : undefined;
-        const result = await runWriteTask("create", () =>
-          createPage(env, {
+        const result = await enqueueWriteTask("create", () =>
+          runCreateTransaction(actor, {
             type,
             title,
             nodeId,
-          }),
+          }), {
+            summarizeResult: (payload) => ({
+              created: payload.created,
+              filePath: payload.filePath,
+            }),
+          }
+        );
+        writeJsonResponse(response, 200, result);
+        return;
+      }
+
+      if (method === "POST" && pathname === "/page-update") {
+        const body = await readJsonBody(request);
+        const actor = resolveWriteActor(request, body, buildCliWriteActor(env));
+        const result = await enqueueWriteTask("update", () =>
+          runUpdateTransaction(actor, {
+            pageId: typeof body.pageId === "string" ? body.pageId : "",
+            bodyMarkdown: typeof body.bodyMarkdown === "string" ? body.bodyMarkdown : undefined,
+            frontmatterPatch: body.frontmatterPatch as Record<string, unknown> | undefined,
+            ifRevision: typeof body.ifRevision === "string" ? body.ifRevision : undefined,
+          }), {
+            summarizeResult: (payload) => ({
+              pageId: payload.pageId,
+              revision: payload.revision,
+            }),
+          }
         );
         writeJsonResponse(response, 200, result);
         return;
@@ -999,13 +1404,17 @@ export async function runDaemonServer(options: {
 
       if (method === "POST" && pathname === "/template/create") {
         const body = await readJsonBody(request);
-        const result = await runWriteTask("template-create", () =>
-          Promise.resolve(
-            createTemplate(env, {
-              type: typeof body.type === "string" ? body.type : "",
-              title: typeof body.title === "string" ? body.title : "",
+        const actor = resolveWriteActor(request, body, buildCliWriteActor(env));
+        const result = await enqueueWriteTask("template-create", () =>
+          runTemplateCreateTransaction(actor, {
+            type: typeof body.type === "string" ? body.type : "",
+            title: typeof body.title === "string" ? body.title : "",
+          }), {
+            summarizeResult: (payload) => ({
+              pageType: typeof payload.pageType === "string" ? payload.pageType : String(body.type ?? ""),
+              templatePath: typeof payload.templatePath === "string" ? payload.templatePath : null,
             }),
-          ),
+          }
         );
         writeJsonResponse(response, 200, result);
         return;
@@ -1041,7 +1450,9 @@ export async function runDaemonServer(options: {
           ? 400
           : appError.type === "not_found"
             ? 404
-            : isBusyError(appError)
+            : isServiceUnavailableError(appError)
+              ? 503
+            : isConflictError(appError)
               ? 409
               : 500;
       writeJsonResponse(response, statusCode, {
@@ -1084,7 +1495,9 @@ export async function runDaemonServer(options: {
   process.on("SIGINT", signalHandler);
 
   if (interval > 0) {
-    void runDefaultCycle("cycle").catch((error) => {
+    void enqueueWriteTask("cycle", () => runCycleTransaction(buildSystemWriteActor("daemon"), "cycle"), {
+      summarizeResult: summarizeCycleResult,
+    }).catch((error: unknown) => {
       const appError = asAppError(error);
       logError(`initial cycle failed: ${appError.message}`);
     });

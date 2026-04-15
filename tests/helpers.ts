@@ -117,6 +117,39 @@ export function readJson<T>(text: string): T {
   return JSON.parse(text) as T;
 }
 
+export function runGit(
+  workspace: Workspace,
+  args: string[],
+  options: { allowFailure?: boolean } = {},
+): { status: number | null; stdout: string; stderr: string } {
+  const result = spawnSync("git", ["-C", workspace.wikiRoot, ...args], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: "test-user",
+      GIT_AUTHOR_EMAIL: "test-user@example.com",
+      GIT_COMMITTER_NAME: "test-user",
+      GIT_COMMITTER_EMAIL: "test-user@example.com",
+    },
+  });
+
+  if (!options.allowFailure && result.status !== 0) {
+    throw new Error(`git ${args.join(" ")} failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+  }
+
+  return {
+    status: result.status,
+    stdout: result.stdout ?? "",
+    stderr: result.stderr ?? "",
+  };
+}
+
+export function initializeGitRepo(workspace: Workspace): void {
+  runGit(workspace, ["init", "-b", "main"]);
+  runGit(workspace, ["config", "user.name", "test-user"]);
+  runGit(workspace, ["config", "user.email", "test-user@example.com"]);
+}
+
 export function runCliJson<T>(
   args: string[],
   env: NodeJS.ProcessEnv,

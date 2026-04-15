@@ -1,6 +1,7 @@
 import { Command } from "commander";
 
 import { executeServerBackedOperation, requestDaemonJson } from "../daemon/client.js";
+import { buildCliWriteActor } from "../daemon/write-actor.js";
 import { runSyncCommand, type SyncCommandResult } from "../operations/write.js";
 import { writeJson } from "../utils/output.js";
 
@@ -29,7 +30,9 @@ export function registerSyncCommand(program: Command): void {
             endpoint,
             method: "POST",
             path: "/sync",
+            timeoutMs: 310_000,
             body: {
+              actor: buildCliWriteActor(process.env),
               path: options.path ?? undefined,
               force: options.force === true,
               skipEmbedding: options.skipEmbedding === true,

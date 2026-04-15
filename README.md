@@ -99,7 +99,7 @@ tiangong-wiki dashboard                               # open dashboard in browse
 # or: tiangong-wiki daemon run                        # run the daemon in the foreground for debugging
 ```
 
-> Environment variables are managed via `.wiki.env` (created by `tiangong-wiki setup`). The CLI prefers the nearest local `.wiki.env`, then falls back to the global default workspace config. See [references/troubleshooting.md](./references/troubleshooting.md) for the full reference.
+> Environment variables are managed via `.wiki.env` (created by `tiangong-wiki setup`). The CLI prefers the nearest local `.wiki.env`, then falls back to the global default workspace config. See [references/troubleshooting.md](./references/troubleshooting.md) for the full reference. For a centralized Linux + `systemd` + Nginx deployment, see [references/centralized-service-deployment.md](./references/centralized-service-deployment.md).
 
 ## CLI
 
