@@ -164,12 +164,12 @@ Full-text search against the `pages_fts` table (title, tags, summary_text). Defa
 ```json
 {
   "fts": {
-    "tokenizer": "default"
+    "tokenizer": "simple"
   }
 }
 ```
 
-Use `simple` to enable the bundled `wangfenjin/simple` tokenizer for Chinese and pinyin-aware matching.
+`simple` is the default. Set `tokenizer` to `default` only if you need the legacy `Intl.Segmenter`-based FTS behavior.
 
 ### rebuild-fts
 

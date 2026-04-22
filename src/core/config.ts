@@ -33,7 +33,7 @@ function ensureStringArray(value: unknown, label: string): string[] {
 
 function ensureFtsTokenizerMode(value: unknown, label: string): FtsTokenizerMode {
   if (value === undefined) {
-    return "default";
+    return "simple";
   }
 
   if (value === "default" || value === "simple") {

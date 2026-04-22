@@ -27,6 +27,9 @@ describe("FTS segmentation integration", () => {
     const workspace = createWorkspace();
     workspaces.push(workspace);
     bootstrapRuntimeAssets(workspace);
+    updateWikiConfig(workspace, (config) => {
+      config.fts = { tokenizer: "default" };
+    });
 
     writePage(
       workspace,

@@ -100,12 +100,12 @@ tiangong-wiki graph bayes-theorem --depth 2           # graph traversal
 ```json
 {
   "fts": {
-    "tokenizer": "default"
+    "tokenizer": "simple"
   }
 }
 ```
 
-Set `tokenizer` to `simple` to enable the bundled `wangfenjin/simple` SQLite extension for Chinese and pinyin-aware full-text search.
+`simple` is now the default. Set `tokenizer` to `default` only if you want the legacy `Intl.Segmenter`-based FTS behavior instead of the bundled `wangfenjin/simple` SQLite extension.
 
 ```bash
 tiangong-wiki daemon start                            # start the daemon in the background
