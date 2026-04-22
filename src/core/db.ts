@@ -207,6 +207,7 @@ function ensureBaseTables(db: Database.Database, embeddingDimensions: number): v
     decision: "TEXT",
     result_manifest_path: "TEXT",
     last_error_at: "TEXT",
+    last_error_code: "TEXT",
     retry_after: "TEXT",
     created_page_ids: "TEXT",
     updated_page_ids: "TEXT",

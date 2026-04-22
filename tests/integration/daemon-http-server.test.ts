@@ -1181,7 +1181,7 @@ describe("daemon HTTP server integration", () => {
     expect(queue.totalPending).toBe(0);
     expect(queue.totalSkipped).toBe(5);
     expect(queue.items.filter((item) => item.status === "skipped")).toHaveLength(5);
-    expect(daemon.logs()).toContain("cycle: queue summary processed=5 done=0 skipped=5 errored=0 batches=3");
+    expect(daemon.logs()).toContain("cycle: queue summary processed=5 done=0 skipped=5 errored=0 batches=1");
   });
 
   it("serves dashboard API contracts and log history from the daemon", async () => {

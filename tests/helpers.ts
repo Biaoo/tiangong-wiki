@@ -28,11 +28,18 @@ export interface SynologyTestState {
 }
 
 const SANITIZED_ENV_PREFIXES = ["WIKI_", "VAULT_", "EMBEDDING_", "OPENROUTER_", "SYNOLOGY_"];
+const SANITIZED_EXACT_ENV_KEYS = ["NODE_OPTIONS"];
+const SANITIZED_TEST_ENV_PREFIXES = ["VITEST", "__VITEST"];
 
 function sanitizeInheritedCliEnv(sourceEnv: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const env = { ...sourceEnv };
   for (const key of Object.keys(env)) {
-    if (key === "WIKI_ENV_FILE" || SANITIZED_ENV_PREFIXES.some((prefix) => key.startsWith(prefix))) {
+    if (
+      key === "WIKI_ENV_FILE" ||
+      SANITIZED_EXACT_ENV_KEYS.includes(key) ||
+      SANITIZED_ENV_PREFIXES.some((prefix) => key.startsWith(prefix)) ||
+      SANITIZED_TEST_ENV_PREFIXES.some((prefix) => key.startsWith(prefix))
+    ) {
       delete env[key];
     }
   }

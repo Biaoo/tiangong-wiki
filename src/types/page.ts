@@ -72,7 +72,9 @@ export interface VaultQueueItem {
   decision?: VaultWorkflowDecision | null;
   resultManifestPath?: string | null;
   lastErrorAt?: string | null;
+  lastErrorCode?: string | null;
   retryAfter?: string | null;
+  autoRetryExhausted?: boolean;
   createdPageIds?: string[];
   updatedPageIds?: string[];
   appliedTypeNames?: string[];

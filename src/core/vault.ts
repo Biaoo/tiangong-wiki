@@ -575,6 +575,7 @@ export function syncVaultIndex(
         decision,
         result_manifest_path,
         last_error_at,
+        last_error_code,
         retry_after,
         created_page_ids,
         updated_page_ids,
@@ -592,6 +593,7 @@ export function syncVaultIndex(
         NULL,
         NULL,
         0,
+        NULL,
         NULL,
         NULL,
         NULL,
@@ -627,6 +629,10 @@ export function syncVaultIndex(
           WHEN vault_processing_queue.status = 'processing' THEN vault_processing_queue.error_message
           ELSE NULL
         END,
+        attempts = CASE
+          WHEN vault_processing_queue.status = 'processing' THEN vault_processing_queue.attempts
+          ELSE 0
+        END,
         thread_id = CASE
           WHEN vault_processing_queue.status = 'processing' THEN vault_processing_queue.thread_id
           ELSE NULL
@@ -645,6 +651,10 @@ export function syncVaultIndex(
         END,
         last_error_at = CASE
           WHEN vault_processing_queue.status = 'processing' THEN vault_processing_queue.last_error_at
+          ELSE NULL
+        END,
+        last_error_code = CASE
+          WHEN vault_processing_queue.status = 'processing' THEN vault_processing_queue.last_error_code
           ELSE NULL
         END,
         retry_after = CASE

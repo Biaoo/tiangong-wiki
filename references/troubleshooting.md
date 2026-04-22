@@ -87,11 +87,13 @@ The agent uses [Codex SDK](https://www.npmjs.com/package/@openai/codex-sdk) to p
 | `WIKI_AGENT_BASE_URL` | No | LLM API base URL (e.g. `https://api.openai.com/v1`). When set, overrides global Codex config |
 | `WIKI_AGENT_API_KEY` | If enabled | API key for the LLM provider |
 | `WIKI_AGENT_MODEL` | No | Model name (e.g. `gpt-5.4`, `Qwen/Qwen3.5-397B-A17B-GPTQ-Int4`) |
-| `WIKI_AGENT_BATCH_SIZE` | No | Max concurrent vault items per batch (default: `5`) |
+| `WIKI_AGENT_BATCH_SIZE` | No | Max concurrent vault queue workers per cycle (default: `5`) |
 | `WIKI_AGENT_SANDBOX_MODE` | No | Codex sandbox mode: `danger-full-access` (default) or `workspace-write` |
 | `WIKI_PARSER_SKILLS` | No | Comma-separated parser skill list (e.g. `pdf,docx,pptx,xlsx`) |
 
 `tiangong-wiki setup` now prompts for `WIKI_AGENT_SANDBOX_MODE` when automatic vault processing is enabled. The default is `danger-full-access`, and the setup wizard highlights that this mode grants full runtime access.
+
+Queue items that fail workflow execution are auto-retried up to 3 times. After that they remain in `error` until you manually retry them from the dashboard / queue tooling, or a later vault sync requeues the file because the source changed.
 
 ---
 

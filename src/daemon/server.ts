@@ -696,6 +696,7 @@ export async function runDaemonServer(options: {
     while (!stopping) {
       const batchResult = await processVaultQueueBatch(env, {
         log: (message) => logInfo(`queue ${message}`),
+        shouldStop: () => stopping,
       });
       if (!batchResult.enabled) {
         break;
