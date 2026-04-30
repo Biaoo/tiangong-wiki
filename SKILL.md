@@ -1,6 +1,6 @@
 ---
 name: tiangong-wiki-skill
-description: "Use when you need to retrieve historically accumulated knowledge, methods, or behavioral patterns before answering or acting; when a conversation or workflow produces durable insights worth preserving for future reuse; or when you discover existing wiki content that is outdated or incorrect and needs correction."
+description: "Use when you need to retrieve historically accumulated knowledge, methods, or behavioral patterns before answering or acting; when a conversation or workflow produces durable insights worth preserving for future reuse; or when existing wiki content is outdated or incorrect. On Windows native shells or Codex automation, invoke the CLI as tiangong-wiki.cmd."
 ---
 
 # Wiki Skill
@@ -8,6 +8,20 @@ description: "Use when you need to retrieve historically accumulated knowledge, 
 ## Core Goal
 
 Use the local wiki as the **durable knowledge layer** — not just for the current conversation, but for all future work. Query first, then read or edit the Markdown files that remain the source of truth.
+
+## CLI Entrypoint
+
+Use `tiangong-wiki <command>` on macOS, Linux, WSL, and Git Bash.
+
+On Windows native shells such as PowerShell, Command Prompt, background daemon tasks, or Codex worker automation, use the npm command shim explicitly:
+
+```powershell
+tiangong-wiki.cmd doctor
+tiangong-wiki.cmd sync
+tiangong-wiki.cmd lint --format json
+```
+
+Do not invoke the suffixless `tiangong-wiki` executable from Windows native shells. npm also installs that shebang script for POSIX-like environments, but Windows may treat it as an unknown file and open the "choose an app" dialog instead of executing the CLI.
 
 ## When to Use
 

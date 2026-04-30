@@ -13,6 +13,14 @@ npx @biaoo/tiangong-wiki <command> [options]
 npm run dev -- <command> [options]
 ```
 
+On Windows native shells (PowerShell, Command Prompt, scheduled/background tasks, and Codex worker automation), use the npm `.cmd` shim explicitly:
+
+```powershell
+tiangong-wiki.cmd <command> [options]
+```
+
+Do not use the suffixless `tiangong-wiki` command in Windows native shells. npm installs it for POSIX-like environments such as macOS, Linux, WSL, and Git Bash; Windows may try to open it as an unknown file instead of executing it.
+
 Global workspace resolution priority:
 
 1. `--env-file <path>`

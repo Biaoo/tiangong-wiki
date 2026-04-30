@@ -122,6 +122,18 @@ Always run `tiangong-wiki lint --path <page-id> --format json` after mutations. 
 
 Parser skills must be installed under `<workspace-root>/.agents/skills/`. Run `tiangong-wiki skill` to inspect installed skills. Use `tiangong-wiki skill update --all` to update.
 
+### Windows opens "choose an app" instead of running tiangong-wiki
+
+In Windows native shells, invoke the npm command shim with the `.cmd` suffix:
+
+```powershell
+tiangong-wiki.cmd daemon status
+tiangong-wiki.cmd sync
+tiangong-wiki.cmd lint --format json
+```
+
+Avoid bare `tiangong-wiki` in PowerShell, Command Prompt, daemon scripts, and Codex worker automation. npm installs a suffixless shebang script for POSIX-like environments, but Windows native shells do not execute it the same way as macOS, Linux, WSL, or Git Bash.
+
 ### Codex workflow sandbox fails to initialize
 
 If the agent workflow fails with `bwrap`, `unshare`, `uid_map`, or similar sandbox startup errors, switch `WIKI_AGENT_SANDBOX_MODE` to `danger-full-access`. Use `workspace-write` only when you explicitly want that sandbox mode and know the host supports it.
