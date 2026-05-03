@@ -426,7 +426,8 @@ export function buildExternalSkillInstallInvocation(source: string, skillName: s
 export function buildExternalSkillInstallSpawnInvocation(
   invocation: { command: string; args: string[] },
   platform: NodeJS.Platform = process.platform,
-): { command: string; args: string[]; shell?: boolean } {
+  env: NodeJS.ProcessEnv = process.env,
+): { command: string; args: string[] } {
   if (platform !== "win32") {
     return {
       command: invocation.command,
@@ -435,9 +436,8 @@ export function buildExternalSkillInstallSpawnInvocation(
   }
 
   return {
-    command: invocation.command,
-    args: invocation.args,
-    shell: true,
+    command: env.ComSpec?.trim() || "cmd.exe",
+    args: ["/d", "/c", "call", invocation.command, ...invocation.args],
   };
 }
 
@@ -474,7 +474,6 @@ function installManagedExternalSkill(
     cwd: workspaceRoot,
     env: options.env ?? process.env,
     encoding: "utf8",
-    shell: spawnInvocation.shell,
     windowsHide: true,
   });
 

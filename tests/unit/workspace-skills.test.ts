@@ -40,10 +40,23 @@ describe("workspace skills", () => {
       ...buildExternalSkillInstallInvocation("custom skill source", "pdf"),
       command: getNpxCommand("win32"),
     };
-    expect(buildExternalSkillInstallSpawnInvocation(invocation, "win32")).toEqual({
-      command: "npx.cmd",
-      args: ["-y", "skills", "add", "custom skill source", "--skill", "pdf", "-a", "codex", "-y"],
-      shell: true,
+    expect(buildExternalSkillInstallSpawnInvocation(invocation, "win32", { ComSpec: "C:\\Windows\\System32\\cmd.exe" })).toEqual({
+      command: "C:\\Windows\\System32\\cmd.exe",
+      args: [
+        "/d",
+        "/c",
+        "call",
+        "npx.cmd",
+        "-y",
+        "skills",
+        "add",
+        "custom skill source",
+        "--skill",
+        "pdf",
+        "-a",
+        "codex",
+        "-y",
+      ],
     });
   });
 
