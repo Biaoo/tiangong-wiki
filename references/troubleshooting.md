@@ -150,10 +150,21 @@ If the agent workflow fails with `bwrap`, `unshare`, `uid_map`, or similar sandb
 
 Create and log in to a dedicated Codex home for the wiki service:
 
+macOS/Linux:
+
 ```bash
 mkdir -p "$HOME/.codex-tiangong-wiki"
 CODEX_HOME="$HOME/.codex-tiangong-wiki" codex login
 CODEX_HOME="$HOME/.codex-tiangong-wiki" codex login status
+```
+
+Windows PowerShell:
+
+```powershell
+New-Item -ItemType Directory -Force "$env:USERPROFILE\.codex-tiangong-wiki" | Out-Null
+$env:CODEX_HOME = "$env:USERPROFILE\.codex-tiangong-wiki"
+codex login
+codex login status
 ```
 
 Then configure the wiki agent:

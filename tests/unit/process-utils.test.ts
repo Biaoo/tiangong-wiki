@@ -26,8 +26,12 @@ describe("process utilities", () => {
       args: ["http://127.0.0.1:3000"],
     });
     expect(buildOpenTargetInvocation("http://127.0.0.1:3000", "win32")).toEqual({
-      command: "cmd",
-      args: ["/c", "start", "", "http://127.0.0.1:3000"],
+      command: "rundll32.exe",
+      args: ["url.dll,FileProtocolHandler", "http://127.0.0.1:3000"],
+    });
+    expect(buildOpenTargetInvocation("http://127.0.0.1:3000/?a=1&b=2", "win32")).toEqual({
+      command: "rundll32.exe",
+      args: ["url.dll,FileProtocolHandler", "http://127.0.0.1:3000/?a=1&b=2"],
     });
   });
 });

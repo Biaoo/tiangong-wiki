@@ -26,6 +26,10 @@ function shellSingleQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
+function batchSetLiteral(value: string): string {
+  return value.replace(/%/g, "%%").replace(/"/g, '""');
+}
+
 function resolveNodeExecutable(): string {
   const currentExec = path.basename(process.execPath).toLowerCase();
   if (currentExec === "node" || currentExec.startsWith("node")) {
@@ -261,9 +265,9 @@ export function ensureWorkflowArtifactSet(
       "@echo off",
       "setlocal",
       "if not defined WIKI_CLI_NODE set \"WIKI_CLI_NODE=%~dp0node.exe\"",
-      `if not exist "%WIKI_CLI_NODE%" set "WIKI_CLI_NODE=${nodeExecutable.replace(/"/g, '""')}"`,
+      `if not exist "%WIKI_CLI_NODE%" set "WIKI_CLI_NODE=${batchSetLiteral(nodeExecutable)}"`,
       "if not defined WIKI_CLI_ENTRYPOINT (",
-      `  set "WIKI_CLI_ENTRYPOINT=${cliEntrypoint.replace(/"/g, '""')}"`,
+      `  set "WIKI_CLI_ENTRYPOINT=${batchSetLiteral(cliEntrypoint)}"`,
       ")",
       "if not exist \"%WIKI_CLI_ENTRYPOINT%\" (",
       "  echo tiangong-wiki CLI entrypoint not found: %WIKI_CLI_ENTRYPOINT% 1>&2",

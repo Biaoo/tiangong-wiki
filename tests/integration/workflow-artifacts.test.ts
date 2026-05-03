@@ -112,7 +112,10 @@ describe("workflow artifacts", () => {
   it("creates a Windows .cmd wiki wrapper for native Windows shells", () => {
     const workspace = createWorkspace();
     workspaces.push(workspace);
-    const paths = resolveRuntimePaths(workspace.env);
+    const paths = {
+      ...resolveRuntimePaths(workspace.env),
+      packageRoot: path.join(workspace.root, "package%20root"),
+    };
 
     const artifacts = ensureWorkflowArtifactSet(paths, {
       queueItemId: "imports/spec.pdf",
@@ -128,6 +131,6 @@ describe("workflow artifacts", () => {
     expect(cmdWrapper).toContain("@echo off");
     expect(cmdWrapper).toContain("WIKI_CLI_NODE");
     expect(cmdWrapper).toContain("WIKI_CLI_ENTRYPOINT");
-    expect(cmdWrapper).toContain(path.join(paths.packageRoot, "dist", "index.js"));
+    expect(cmdWrapper).toContain(path.join(paths.packageRoot, "dist", "index.js").replace(/%/g, "%%"));
   });
 });

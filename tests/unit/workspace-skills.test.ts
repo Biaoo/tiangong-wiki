@@ -33,6 +33,7 @@ describe("workspace skills", () => {
     expect(getNpxCommand("darwin")).toBe("npx");
     expect(getNpxCommand("linux")).toBe("npx");
     expect(buildExternalSkillInstallInvocation("repo", "pdf").args).toContain("--skill");
+    expect(buildExternalSkillInstallInvocation("custom skill source", "pdf").rendered).toContain('"custom skill source"');
   });
 
   it("creates a workspace-local tiangong-wiki-skill symlink", () => {

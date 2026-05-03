@@ -405,7 +405,7 @@ function createWikiDescriptor(wikiPath: string, packageRoot: string): ManagedSki
 
 function renderCommand(command: string, args: string[]): string {
   return [command, ...args]
-    .map((part) => (/[A-Za-z0-9_./:@+-]+/.test(part) ? part : JSON.stringify(part)))
+    .map((part) => (/^[A-Za-z0-9_./:@+-]+$/.test(part) ? part : JSON.stringify(part)))
     .join(" ");
 }
 

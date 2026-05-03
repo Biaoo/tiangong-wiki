@@ -71,7 +71,7 @@ export function buildOpenTargetInvocation(
     return { command: "open", args: [target] };
   }
   if (platform === "win32") {
-    return { command: "cmd", args: ["/c", "start", "", target] };
+    return { command: "rundll32.exe", args: ["url.dll,FileProtocolHandler", target] };
   }
   return { command: "xdg-open", args: [target] };
 }
