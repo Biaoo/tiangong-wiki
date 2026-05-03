@@ -46,7 +46,7 @@ describe("workspace skills", () => {
         "/d",
         "/s",
         "/c",
-        '"npx.cmd" "-y" "skills" "add" "custom skill source" "--skill" "pdf" "-a" "codex" "-y"',
+        'npx.cmd -y skills add "custom skill source" --skill pdf -a codex -y',
       ],
     });
   });

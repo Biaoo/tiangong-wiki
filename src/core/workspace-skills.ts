@@ -423,8 +423,14 @@ export function buildExternalSkillInstallInvocation(source: string, skillName: s
   };
 }
 
-function quoteWindowsCmdArgument(value: string): string {
-  return `"${value.replace(/%/g, "%%").replace(/"/g, '\\"')}"`;
+const WINDOWS_CMD_ARGUMENT_NEEDS_QUOTES = /[\s&()<>^|"]/;
+
+function renderWindowsCmdArgument(value: string): string {
+  const escaped = value.replace(/%/g, "%%").replace(/"/g, '""');
+  if (escaped && !WINDOWS_CMD_ARGUMENT_NEEDS_QUOTES.test(escaped)) {
+    return escaped;
+  }
+  return `"${escaped}"`;
 }
 
 export function buildExternalSkillInstallSpawnInvocation(
@@ -441,7 +447,7 @@ export function buildExternalSkillInstallSpawnInvocation(
 
   return {
     command: env.ComSpec?.trim() || "cmd.exe",
-    args: ["/d", "/s", "/c", [invocation.command, ...invocation.args].map(quoteWindowsCmdArgument).join(" ")],
+    args: ["/d", "/s", "/c", [invocation.command, ...invocation.args].map(renderWindowsCmdArgument).join(" ")],
   };
 }
 
